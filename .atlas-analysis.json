@@ -1,0 +1,131 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Kimaki",
+  "projectDescription": "Discord bot that orchestrates OpenCode AI coding sessions through Discord channels and threads",
+  "theme": "aspen",
+  "primaryColor": "#5865F2",
+  "lightColor": "#7289DA",
+  "darkColor": "#4752C4",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/channels-and-threads",
+              "concepts/sessions",
+              "concepts/permissions"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/text-messages",
+              "features/voice-messages",
+              "features/file-attachments",
+              "features/worktrees",
+              "features/scheduled-tasks",
+              "features/memory"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/discord-setup",
+              "configuration/multiple-instances",
+              "configuration/opencode-config",
+              "configuration/model-agent"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/best-practices",
+              "guides/team-collaboration",
+              "guides/ci-automation",
+              "guides/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "Commands",
+            "pages": [
+              "cli/overview",
+              "cli/send",
+              "cli/project-add",
+              "cli/upload-to-discord",
+              "cli/task-management",
+              "cli/upgrade"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Slash Commands",
+        "groups": [
+          {
+            "group": "Reference",
+            "pages": [
+              "slash-commands/overview",
+              "slash-commands/session-management",
+              "slash-commands/worktree-commands",
+              "slash-commands/configuration",
+              "slash-commands/utilities"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Discord bot integration with OpenCode",
+    "Channel-to-project directory mapping",
+    "Git worktree isolation for sessions",
+    "Voice message transcription with Gemini",
+    "Scheduled tasks with cron support",
+    "Persistent memory across sessions",
+    "Permission system for tool execution",
+    "Multi-instance support",
+    "Programmatic session control via CLI"
+  ],
+  "publicApiSurface": [
+    "npx kimaki",
+    "npx kimaki send",
+    "npx kimaki project add",
+    "npx kimaki upload-to-discord",
+    "npx kimaki task list",
+    "npx kimaki task delete",
+    "npx kimaki upgrade",
+    "/session",
+    "/resume",
+    "/abort",
+    "/add-project",
+    "/create-new-project",
+    "/new-worktree",
+    "/merge-worktree",
+    "/model",
+    "/agent",
+    "/share",
+    "/fork",
+    "/queue",
+    "/clear-queue",
+    "/undo",
+    "/redo",
+    "/upgrade-and-restart"
+  ]
+}
