@@ -1,0 +1,221 @@
+---
+title: Team Collaboration
+description: Using Kimaki with teams, managing permissions, and sharing sessions
+---
+
+Kimaki is designed for team collaboration, allowing multiple users to work with AI coding agents in a shared Discord environment.
+
+## Permission System
+
+### Who Can Use Kimaki
+
+Only users with specific Discord permissions can interact with the bot. This ensures that only trusted team members can trigger AI sessions that modify your codebase.
+
+**Allowed permissions:**
+
+- **Server Owner** - Full access
+- **Administrator** - Full access
+- **Manage Server** - Full access
+- **"Kimaki" role** - Create a role with this name and assign to trusted users
+
+Messages from users without these permissions are ignored silently.
+
+<Note>
+The permission check happens for every message. Users without permission won't see error messages - their messages are simply ignored.
+</Note>
+
+### Setting Up the Kimaki Role
+
+The best practice for team access is to create a custom role:
+
+<Steps>
+  <Step title="Create the Kimaki role">
+    In Discord Server Settings → Roles, create a new role named "Kimaki" (case-insensitive)
+  </Step>
+  <Step title="Assign to team members">
+    Assign this role to users who should be able to trigger AI sessions
+  </Step>
+  <Step title="Review periodically">
+    Review role assignments periodically as team members join or leave
+  </Step>
+</Steps>
+
+<Tip>
+You don't need to grant any special Discord permissions to the Kimaki role - just having the role is enough.
+</Tip>
+
+### Blocking Access with "no-kimaki" Role
+
+The **"no-kimaki"** role (case-insensitive) blocks specific users from using the bot, even if they have other permissions like Server Owner or Administrator.
+
+This implements the "four-eyes principle" - it adds friction to prevent accidental usage.
+
+**How it works:**
+
+1. Create a role named "no-kimaki" in your Discord server
+2. Assign it to users who should be blocked
+3. Even server owners with this role cannot trigger sessions
+4. To use the bot again, the role must be manually removed
+
+**Use cases:**
+
+<Accordion title="Prevent accidental triggers">
+Server owners who share Discord servers might accidentally trigger sessions in the wrong channel. The no-kimaki role requires them to consciously remove it before interacting.
+</Accordion>
+
+<Accordion title="Temporary access control">
+Temporarily disable access for specific users without changing their other Discord permissions.
+</Accordion>
+
+<Accordion title="Break-glass scenario">
+Removing the role is a deliberate action that creates an audit trail in Discord's server logs.
+</Accordion>
+
+## Multiple Discord Servers
+
+A single Kimaki instance can serve multiple Discord servers. This is useful for teams working across different organizations or projects.
+
+### Method 1: Use /add-project Command
+
+<Steps>
+  <Step title="Set up the bot">
+    Run `npx kimaki` once to set up the bot
+  </Step>
+  <Step title="Install in both servers">
+    Install the bot in both servers using the install URL
+  </Step>
+  <Step title="Add projects to Server A">
+    In Server A, run `/add-project` and select your project
+  </Step>
+  <Step title="Add projects to Server B">
+    In Server B, run `/add-project` and select your project
+  </Step>
+</Steps>
+
+The `/add-project` command creates channels in whichever server you run it from.
+
+### Method 2: Re-run CLI with --add-channels
+
+<Steps>
+  <Step title="Initial setup">
+    Run `npx kimaki` - set up bot, install in both servers, create channels in first server
+  </Step>
+  <Step title="Add channels to second server">
+    Run `npx kimaki --add-channels` - select projects for the second server
+  </Step>
+</Steps>
+
+The setup wizard lets you pick one server at a time.
+
+<Note>
+You can even link the same project to channels in multiple servers - both will point to the same directory on your machine.
+</Note>
+
+## Session Management
+
+### Resume and Fork Sessions
+
+Kimaki provides powerful session management features for team collaboration:
+
+**Resume sessions:**
+
+Continue where you left off using `/resume <session>`. The command has autocomplete to help you find previous sessions.
+
+**Fork sessions:**
+
+Branch from any message in the conversation using `/fork`. This creates a new thread starting from that specific point, allowing you to explore different approaches without affecting the main session.
+
+**Share sessions:**
+
+Generate public URLs to share your session using `/share`. This creates a read-only link that anyone can view, even if they don't have access to your Discord server.
+
+<CodeGroup>
+```text Resume a session
+/resume <session-id>
+```
+
+```text Fork from a message
+/fork
+```
+
+```text Share a session
+/share
+```
+</CodeGroup>
+
+### Message Queue
+
+Use `/queue <message>` to queue a follow-up message while the AI is still responding. The queued message sends automatically when the current response finishes. If no response is in progress, it sends immediately.
+
+This is useful for chaining tasks without waiting:
+
+<Steps>
+  <Step title="Start a task">
+    Send a message: "Add user authentication"
+  </Step>
+  <Step title="Queue follow-up">
+    While the AI is working: `/queue Write tests for the auth endpoints`
+  </Step>
+  <Step title="Auto-execution">
+    When the first task completes, the queued message automatically sends
+  </Step>
+</Steps>
+
+Clear all queued messages with `/clear-queue`.
+
+## Tool Permissions
+
+When the AI agent tries to run a tool that requires approval (like executing shell commands or accessing files outside the project), Kimaki shows a permission prompt directly in the Discord thread with three buttons:
+
+- **Accept** - approve this one request
+- **Accept Always** - auto-approve similar requests for the rest of the session
+- **Deny** - block the request
+
+<Warning>
+By default, most tools run without asking. The main exception is `external_directory` - any tool that touches paths outside the project directory will prompt for approval.
+</Warning>
+
+### Configuring Team-Wide Permissions
+
+You can customize permissions in your project's `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "git *": "allow",
+      "npm *": "allow",
+      "rm *": "deny"
+    },
+    "external_directory": {
+      "~/other-project/**": "allow"
+    }
+  }
+}
+```
+
+Each permission resolves to:
+
+- `"allow"` - run automatically without prompting
+- `"ask"` - show approval buttons in Discord
+- `"deny"` - block the operation
+
+See the [OpenCode Permissions documentation](https://opencode.ai/docs/permissions/) for all available permissions and pattern matching syntax.
+
+## Git Worktrees for Isolated Work
+
+Use `/new-worktree <name>` to create a git worktree and start a session. This creates an isolated branch and directory, perfect for:
+
+- Testing experimental changes without affecting the main branch
+- Working on multiple features in parallel
+- Allowing different team members to work on different branches simultaneously
+
+Worktree channels are prefixed with ⬦ to indicate they're isolated environments.
+
+When you're done, use `/merge-worktree` to merge the worktree branch into the default branch.
+
+<Tip>
+Worktrees share the same git history and objects, so they're much lighter than full clones.
+</Tip>

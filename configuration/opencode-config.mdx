@@ -1,0 +1,300 @@
+---
+title: OpenCode Configuration
+description: Configure tool permissions, behavior, and security with opencode.json
+---
+
+Kimaki uses OpenCode as its underlying code agent. You can customize OpenCode's behavior by creating an `opencode.json` file in your project root.
+
+## Configuration File
+
+Create `opencode.json` in your project directory:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "anthropic/claude-sonnet-4-20250514",
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "git *": "allow",
+      "npm *": "allow",
+      "rm *": "deny"
+    },
+    "external_directory": {
+      "~/other-project/**": "allow"
+    }
+  }
+}
+```
+
+<Info>
+  Changes to `opencode.json` require restarting the OpenCode server. Use `/restart-opencode-server` in Discord or restart the Kimaki bot.
+</Info>
+
+## Permission Modes
+
+Each permission resolves to one of three modes:
+
+- **`allow`** - Run automatically without prompting
+- **`ask`** - Show approval buttons in Discord thread
+- **`deny`** - Block the request entirely
+
+## Tool Permissions
+
+### Bash Commands
+
+Control shell command execution with glob patterns:
+
+```json
+{
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "git *": "allow",
+      "npm *": "allow",
+      "pnpm *": "allow",
+      "bun *": "allow",
+      "rm -rf *": "deny",
+      "rm *": "ask"
+    }
+  }
+}
+```
+
+**Pattern Matching:**
+
+- `*` - Matches any command (wildcard)
+- `git *` - Matches any command starting with `git`
+- `rm -rf *` - Matches `rm -rf` with any arguments
+- Specific patterns take precedence over wildcards
+
+**Common Patterns:**
+
+```json
+{
+  "bash": {
+    "*": "ask",
+    "git *": "allow",
+    "npm install": "allow",
+    "npm run *": "allow",
+    "docker *": "ask",
+    "curl *": "allow",
+    "rm -rf *": "deny",
+    "sudo *": "deny"
+  }
+}
+```
+
+### External Directory Access
+
+By default, Kimaki only allows file operations within the project directory. Accessing files outside the project triggers a permission prompt.
+
+**Allow Specific Paths:**
+
+```json
+{
+  "permission": {
+    "external_directory": {
+      "~/other-project/**": "allow",
+      "/etc/nginx/**": "ask",
+      "/var/log/**": "deny"
+    }
+  }
+}
+```
+
+**Patterns:**
+
+- `~/path/**` - Matches directory and all subdirectories
+- `/absolute/path/**` - Absolute path matching
+- Relative paths are not supported (use absolute or `~`)
+
+<Warning>
+  Be cautious with `external_directory` permissions. Allowing broad access (e.g., `/**`) can be dangerous.
+</Warning>
+
+## Default Model
+
+Set the default AI model for this project:
+
+```json
+{
+  "model": "anthropic/claude-sonnet-4-20250514"
+}
+```
+
+**Format:** `provider/model-name`
+
+**Examples:**
+
+- `anthropic/claude-sonnet-4-20250514` - Claude Sonnet 4
+- `anthropic/claude-opus-4-20250514` - Claude Opus 4
+- `openai/gpt-4o` - GPT-4o
+- `google/gemini-2.5-pro` - Gemini 2.5 Pro
+
+<Note>
+  Use `/model` in Discord to override the default model per channel or session.
+</Note>
+
+## Permission Approval Flow
+
+When a tool requires approval, Kimaki shows buttons in the Discord thread:
+
+- **Accept** - Approve this one request
+- **Accept Always** - Auto-approve similar requests for this session
+- **Deny** - Block the request
+
+**Example:**
+
+```
+The agent wants to run: rm package-lock.json
+
+[Accept] [Accept Always] [Deny]
+```
+
+Click **Accept Always** to skip future prompts for similar commands in this session.
+
+## Per-Agent Permissions
+
+Override permissions for specific agents:
+
+```json
+{
+  "permission": {
+    "bash": {
+      "*": "ask"
+    },
+    "agent": {
+      "deploy": {
+        "bash": {
+          "*": "allow",
+          "rm -rf *": "deny"
+        }
+      }
+    }
+  }
+}
+```
+
+When using the `deploy` agent, bash commands run without approval (except `rm -rf`).
+
+## Full Schema Reference
+
+See the [OpenCode Permissions documentation](https://opencode.ai/docs/permissions/) for:
+
+- Complete list of permission keys
+- Advanced pattern matching syntax
+- Permission precedence rules
+- Security best practices
+
+## Common Configurations
+
+**Minimal (Default Behavior):**
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json"
+}
+```
+
+All defaults apply. External directory access prompts for approval.
+
+**Permissive (Auto-Approve Safe Commands):**
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "git *": "allow",
+      "npm *": "allow",
+      "pnpm *": "allow",
+      "bun *": "allow",
+      "node *": "allow",
+      "ls *": "allow",
+      "cat *": "allow"
+    }
+  }
+}
+```
+
+**Restrictive (Require Approval for Most Commands):**
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "git status": "allow",
+      "git diff": "allow",
+      "npm install": "deny",
+      "rm *": "deny",
+      "sudo *": "deny"
+    },
+    "external_directory": {
+      "/**": "deny"
+    }
+  }
+}
+```
+
+## Reloading Configuration
+
+After modifying `opencode.json`:
+
+<Steps>
+  <Step title="Save File">
+    Save your changes to `opencode.json`.
+  </Step>
+
+  <Step title="Restart OpenCode Server">
+    Use `/restart-opencode-server` in any channel for this project.
+
+    <Info>
+      This restarts only the OpenCode server for this project. Other projects are unaffected.
+    </Info>
+  </Step>
+
+  <Step title="Verify Changes">
+    Start a new session and test the permission changes.
+  </Step>
+</Steps>
+
+## Debugging Permissions
+
+If permissions aren't working as expected:
+
+**Check file location:**
+
+```bash
+# File must be in project root
+ls -la opencode.json
+```
+
+**Validate JSON syntax:**
+
+```bash
+# Use jq or similar to check for syntax errors
+jq . opencode.json
+```
+
+**Check OpenCode server logs:**
+
+Permission errors are logged in `~/.kimaki/kimaki.log`.
+
+**Test with `/restart-opencode-server`:**
+
+Restart the server to ensure changes are loaded.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Model Configuration" icon="brain" href="/configuration/model-agent">
+    Configure AI models and agents
+  </Card>
+  <Card title="Permissions Guide" icon="shield" href="/concepts/permissions">
+    Learn about permission system in detail
+  </Card>
+</CardGroup>

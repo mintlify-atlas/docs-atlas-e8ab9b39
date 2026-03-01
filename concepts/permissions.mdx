@@ -1,0 +1,513 @@
+---
+title: Permission System
+description: Tool execution permissions, approval flows, and configuration
+---
+
+# Permission System
+
+Kimaki integrates with OpenCode's permission system to control which operations the AI can perform on your machine.
+
+## Permission Levels
+
+OpenCode supports three permission levels:
+
+- **`allow`**: Run automatically without asking
+- **`ask`**: Show permission prompt in Discord (3 buttons: Accept, Accept Always, Deny)
+- **`deny`**: Block the operation
+
+## Default Permissions
+
+By default, most tools run without asking. The main exception is `external_directory` - any tool that accesses paths outside the project directory will prompt for approval.
+
+```typescript
+// Built-in default behavior
+permission: {
+  external_directory: {
+    '*': 'ask'  // Prompt for any external path access
+  }
+}
+```
+
+## Configuration
+
+Configure permissions in your project's `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "git *": "allow",
+      "npm *": "allow",
+      "rm *": "deny"
+    },
+    "external_directory": {
+      "~/other-project/**": "allow"
+    }
+  }
+}
+```
+
+### Pattern Matching
+
+Permission patterns support wildcards:
+
+- `*`: Matches any sequence of characters
+- `?`: Matches a single character
+- `**`: Matches directories recursively (for paths)
+
+```json
+{
+  "permission": {
+    "bash": {
+      "git *": "allow",        // Allow all git commands
+      "npm install *": "allow",  // Allow npm install
+      "rm -rf *": "deny"         // Block destructive rm
+    },
+    "external_directory": {
+      "~/.config/**": "deny",     // Block config access
+      "/tmp/**": "allow"           // Allow tmp access
+    }
+  }
+}
+```
+
+### Per-Agent Permissions
+
+If using multiple agents, configure per-agent permissions:
+
+```json
+{
+  "agents": [
+    {
+      "name": "restricted",
+      "permission": {
+        "bash": {
+          "*": "ask",
+          "git status": "allow"
+        }
+      }
+    }
+  ]
+}
+```
+
+## Permission Flow
+
+### Request from OpenCode
+
+When the AI attempts a restricted operation:
+
+```typescript
+// 1. OpenCode emits permission.request event
+event = {
+  type: 'permission.request',
+  data: {
+    id: 'perm_abc123',
+    permission: 'bash',
+    patterns: ['rm -rf node_modules'],
+    directory: '/path/to/project'
+  }
+}
+
+// 2. Kimaki receives event in session-handler.ts
+```
+
+### Display in Discord
+
+Kimaki shows permission buttons:
+
+```typescript
+await showPermissionButtons({
+  thread,
+  permission,
+  directory,
+  permissionDirectory
+})
+
+// Creates message:
+// ⚠️ Permission Required
+// Type: `bash`
+// Pattern: `rm -rf node_modules`
+// [Accept] [Accept Always] [Deny]
+```
+
+Buttons:
+
+- **Accept**: Approve this one request
+- **Accept Always**: Auto-approve similar requests for the rest of the session
+- **Deny**: Block the request
+
+### User Response
+
+```typescript
+// User clicks button
+async function handlePermissionButton(interaction: ButtonInteraction) {
+  const response = 'once' | 'always' | 'reject'
+  
+  // Send reply to OpenCode
+  await client.permission.reply({
+    requestID: permission.id,
+    directory: permissionDirectory,
+    reply: response
+  })
+  
+  // Update message
+  await interaction.editReply({
+    content: '✅ Permission accepted',
+    components: []  // Remove buttons
+  })
+}
+```
+
+### OpenCode Processes Reply
+
+OpenCode receives the reply and:
+
+- **Accept**: Runs the operation
+- **Accept Always**: Runs the operation and auto-approves similar patterns for this session
+- **Deny**: Cancels the operation and informs the AI
+
+## Permission Deduplication
+
+Multiple identical permission requests are batched:
+
+```typescript
+function buildPermissionDedupeKey({
+  permission,
+  directory
+}) {
+  // Sort patterns for consistent comparison
+  const sorted = [...permission.patterns].sort()
+  return `${directory}::${permission.permission}::${sorted.join('|')}`
+}
+
+// If same key arrives while pending:
+context.requestIds.push(permission.id)
+// User's button click answers all batched requests
+```
+
+Example: If the AI tries to run `git status` three times while waiting for approval, only one button prompt appears. Clicking "Accept" approves all three.
+
+## Pattern Coverage Detection
+
+Kimaki detects when new permission requests are covered by previous ones:
+
+```typescript
+export function arePatternsCoveredBy({
+  patterns,
+  coveringPatterns
+}) {
+  return patterns.every(pattern => 
+    coveringPatterns.some(coveringPattern =>
+      wildcardMatch({ value: pattern, pattern: coveringPattern })
+    )
+  )
+}
+
+// Example:
+arePatternsCoveredBy({
+  patterns: ['git status', 'git log'],
+  coveringPatterns: ['git *']
+}) // true - both covered by 'git *'
+```
+
+If a pending permission already covers the new request, the new one is added to the existing context without showing a new button.
+
+## Auto-Rejection
+
+Pending permissions are auto-rejected when:
+
+1. **New message arrives**: User sends new message before answering
+2. **Session aborted**: User runs `/abort`
+
+```typescript
+// Auto-reject ALL pending permissions for this thread
+const threadPermissions = pendingPermissions.get(threadId)
+
+for (const [permId, pendingPerm] of threadPermissions) {
+  // Remove buttons
+  await message.edit({ components: [] })
+  
+  // Reject via API
+  await client.permission.reply({
+    requestID: permId,
+    directory: pendingPerm.permissionDirectory,
+    reply: 'reject'
+  })
+}
+
+pendingPermissions.delete(threadId)
+```
+
+## Wildcard Matching
+
+Pattern matching implementation:
+
+```typescript
+function wildcardMatch({ value, pattern }) {
+  // Escape regex special chars
+  let escapedPattern = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')    // * → .*
+    .replace(/\?/g, '.')     // ? → .
+  
+  // Special case: "git *" matches "git" alone
+  if (escapedPattern.endsWith(' .*')) {
+    escapedPattern = escapedPattern.slice(0, -3) + '( .*)?'
+  }
+  
+  return new RegExp(`^${escapedPattern}$`, 's').test(value)
+}
+
+// Examples:
+wildcardMatch({ value: 'git status', pattern: 'git *' })     // true
+wildcardMatch({ value: 'git', pattern: 'git *' })            // true
+wildcardMatch({ value: 'npm install', pattern: 'npm *' })    // true
+wildcardMatch({ value: 'rm -rf /', pattern: 'rm *' })       // true
+```
+
+## Pattern Compaction
+
+Display patterns are compacted to avoid redundancy:
+
+```typescript
+function compactPermissionPatterns(patterns: string[]) {
+  const unique = Array.from(new Set(patterns))
+  
+  // Remove patterns covered by other patterns
+  return unique.filter((pattern, index) => 
+    !unique.some((candidate, candidateIndex) => {
+      if (candidateIndex === index) return false
+      return wildcardMatch({ value: pattern, pattern: candidate })
+    })
+  )
+}
+
+// Example:
+compactPermissionPatterns([
+  'git status',
+  'git log',
+  'git *'
+])
+// Returns: ['git *']
+// (specific patterns removed as they're covered by 'git *')
+```
+
+## Common Permission Patterns
+
+### Safe by Default
+
+```json
+{
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "git status": "allow",
+      "git diff *": "allow",
+      "git log *": "allow",
+      "ls *": "allow",
+      "cat *": "allow"
+    }
+  }
+}
+```
+
+### Development Environment
+
+```json
+{
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "git *": "allow",
+      "npm *": "allow",
+      "pnpm *": "allow",
+      "bunx *": "allow",
+      "curl *": "allow"
+    },
+    "external_directory": {
+      "~/.config/**": "deny",
+      "~/Documents/**": "deny"
+    }
+  }
+}
+```
+
+### Strict Security
+
+```json
+{
+  "permission": {
+    "bash": {
+      "*": "deny",
+      "git status": "allow",
+      "git diff": "allow",
+      "ls": "allow"
+    },
+    "edit": {
+      "*": "ask"
+    },
+    "external_directory": {
+      "*": "deny"
+    }
+  }
+}
+```
+
+## Reloading Configuration
+
+Permission changes in `opencode.json` require OpenCode server restart:
+
+```typescript
+// Discord command
+/restart-opencode-server
+
+// Or restart Kimaki bot
+kill -SIGUSR2 <PID>
+```
+
+The server reads `opencode.json` on startup. Changes during runtime are not detected.
+
+## Debugging Permissions
+
+If permissions aren't working as expected:
+
+1. **Check `opencode.json` syntax**:
+   ```bash
+   # Validate JSON
+   jq . opencode.json
+   ```
+
+2. **Check OpenCode logs**:
+   ```bash
+   # Kimaki log file
+   tail -f ~/.kimaki/kimaki.log | grep PERMISSION
+   ```
+
+3. **Test pattern matching**:
+   ```typescript
+   // In Node.js REPL
+   function wildcardMatch({ value, pattern }) {
+     let escapedPattern = pattern
+       .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+       .replace(/\*/g, '.*')
+       .replace(/\?/g, '.')
+     if (escapedPattern.endsWith(' .*')) {
+       escapedPattern = escapedPattern.slice(0, -3) + '( .*)?'
+     }
+     return new RegExp(`^${escapedPattern}$`, 's').test(value)
+   }
+   
+   wildcardMatch({ value: 'npm install express', pattern: 'npm *' })
+   ```
+
+4. **Verify server restart**:
+   ```bash
+   # Check if server is using new config
+   curl http://127.0.0.1:<port>/api/health
+   ```
+
+## Permission Context Storage
+
+Pending permissions are stored in memory:
+
+```typescript
+export const pendingPermissions = new Map<
+  string,  // threadId
+  Map<
+    string,  // permissionId
+    {
+      permission: PermissionRequest
+      messageId: string
+      directory: string
+      permissionDirectory: string
+      contextHash: string
+      dedupeKey: string
+    }
+  >
+>()
+```
+
+They are **not** persisted to SQLite. If the bot restarts, pending permissions are lost and must be re-requested.
+
+## Best Practices
+
+### Start Restrictive
+
+Begin with `ask` for all operations:
+
+```json
+{
+  "permission": {
+    "bash": { "*": "ask" },
+    "edit": { "*": "ask" },
+    "external_directory": { "*": "ask" }
+  }
+}
+```
+
+Then gradually add `allow` patterns based on usage.
+
+### Use Specific Patterns
+
+Prefer specific patterns over broad wildcards:
+
+```json
+// ✅ Good
+{
+  "bash": {
+    "git status": "allow",
+    "git diff *": "allow",
+    "npm ci": "allow"
+  }
+}
+
+// ❌ Risky
+{
+  "bash": {
+    "*": "allow"  // Allows everything!
+  }
+}
+```
+
+### Deny Dangerous Commands
+
+```json
+{
+  "bash": {
+    "rm -rf /*": "deny",
+    "rm -rf ~/*": "deny",
+    "chmod -R *": "deny",
+    "chown -R *": "deny"
+  }
+}
+```
+
+### External Directory Allowlist
+
+Explicitly allow known safe paths:
+
+```json
+{
+  "external_directory": {
+    "*": "deny",
+    "~/projects/**": "allow",
+    "/tmp/**": "allow"
+  }
+}
+```
+
+### Use "Accept Always" Carefully
+
+Clicking "Accept Always" auto-approves similar patterns **for the entire session**. Use it only for operations you trust completely (e.g., `git status`, `npm install`).
+
+The "always" rule is lost when:
+- Session ends
+- Bot restarts
+- OpenCode server restarts
+
+## Related Documentation
+
+For complete permission configuration options, see the [OpenCode Permissions documentation](https://opencode.ai/docs/permissions/).

@@ -1,0 +1,406 @@
+---
+title: Utility Commands
+description: Queue management, undo/redo, and maintenance commands for Kimaki sessions
+---
+
+Utility commands help you manage message queues, undo mistakes, and maintain your Kimaki installation.
+
+## /queue
+
+Queue a message to send automatically after the current response finishes.
+
+### Parameters
+
+- `message` (required) - The message to queue
+
+### Usage
+
+```
+/queue message:"Now add error handling"
+```
+
+### Behavior
+
+**If a session is actively responding**:
+1. Adds the message to the queue for that thread
+2. Shows: "Message queued (position: 1). Will be sent after current response."
+3. When the current response completes, sends the queued message automatically
+
+**If no session is active**:
+1. Sends the message immediately
+2. Shows: "» **Your Name:** Now add error handling"
+
+<Note>
+**Queueing vs. Sending**: Use `/queue` instead of regular messages to avoid interrupting the AI mid-response. Queued messages send in order after each response completes.
+</Note>
+
+### Example Workflow
+
+```
+You: "Add user authentication"
+AI: [implementing auth...]
+
+/queue message:"Now add tests"
+/queue message:"Update the README"
+
+→ Queue:
+  1. "Now add tests"
+  2. "Update the README"
+
+AI: [finishes auth]
+→ Sends "Now add tests" automatically
+
+AI: [writing tests...]
+AI: [finishes tests]
+→ Sends "Update the README" automatically
+```
+
+### Multiple Users
+
+Each thread has its own queue shared by all users:
+
+```
+User A: /queue message:"Fix the bug"
+User B: /queue message:"Add logging"
+
+→ Queue:
+  1. User A: "Fix the bug"
+  2. User B: "Add logging"
+```
+
+Messages are processed in the order they were queued.
+
+## /clear-queue
+
+Clear all queued messages in the current thread.
+
+### Parameters
+
+None.
+
+### Usage
+
+```
+/clear-queue
+```
+
+### Behavior
+
+1. Removes all messages from the thread's queue
+2. Shows: "🗑 Cleared 3 queued messages"
+3. Does not affect the currently running response
+
+<Note>
+**No Undo**: Clearing the queue is permanent. Queued messages are lost.
+</Note>
+
+### When to Use
+
+- You queued messages but changed your mind
+- The AI is heading in a different direction
+- You want to abort and start fresh
+
+<Warning>
+**Thread Only**: `/clear-queue` only works in threads. Each thread has an independent queue.
+</Warning>
+
+## /undo
+
+Undo the last assistant message, reverting all file changes it made.
+
+### Parameters
+
+None.
+
+### Usage
+
+```
+/undo
+```
+
+### Behavior
+
+<Steps>
+
+### Find Last Assistant Message
+
+Kimaki fetches all messages in the session and finds the most recent assistant message.
+
+### Call OpenCode Revert API
+
+Calls `session.revert({ sessionID, messageID })` to revert that message.
+
+### Revert File Changes
+
+OpenCode reverts all file edits made by that message using git:
+
+```bash
+git apply --reverse [diff]
+```
+
+### Show Diff
+
+Kimaki shows what was reverted:
+
+```
+⏪ Undone - reverted last assistant message
+
+```diff
+- export function auth() {
+-   return true;
+- }
+```
+```
+
+</Steps>
+
+<Note>
+**Git Required**: Undo uses git to revert changes. It only works in git repositories.
+</Note>
+
+### Multiple Undos
+
+You can undo multiple times:
+
+```
+/undo  → Reverts message 3
+/undo  → Reverts message 2
+/undo  → Reverts message 1
+```
+
+Each `/undo` reverts the most recent assistant message that hasn't been undone yet.
+
+### What Gets Reverted
+
+- **File edits**: `write`, `edit` tool calls
+- **Deleted files**: Restored from git
+- **New files**: Removed
+
+**Not reverted**:
+- Bash commands (can't undo side effects)
+- External API calls (MCP tools)
+- Manual changes you made after the message
+
+## /redo
+
+Redo the last undone message, restoring the changes.
+
+### Parameters
+
+None.
+
+### Usage
+
+```
+/redo
+```
+
+### Behavior
+
+1. Checks if the session has a revert state
+2. Calls `session.unrevert({ sessionID })` to restore the changes
+3. Shows: "⏩ Restored - session back to previous state"
+
+<Note>
+**Single Redo**: Kimaki only tracks the most recent undo. You can't redo multiple times.
+</Note>
+
+### Undo/Redo Example
+
+```
+AI: [makes changes]
+
+/undo
+→ Changes reverted
+
+/redo
+→ Changes restored
+
+/undo
+→ Changes reverted again
+```
+
+### When to Use
+
+- You undid by mistake
+- You reviewed the changes and decided they were good
+- You want to compare before/after by toggling undo/redo
+
+## /upgrade-and-restart
+
+Upgrade Kimaki to the latest version and restart the bot.
+
+### Parameters
+
+None.
+
+### Usage
+
+```
+/upgrade-and-restart
+```
+
+### Behavior
+
+<Steps>
+
+### Check for Updates
+
+Kimaki checks npm for the latest published version:
+
+```bash
+npm view kimaki version
+```
+
+### Compare Versions
+
+If the npm version is newer than the running version:
+
+```
+Current: v1.0.5
+Latest:  v1.0.8
+```
+
+### Install Latest
+
+Runs npm install globally:
+
+```bash
+npm install -g kimaki@latest
+```
+
+### Spawn New Process
+
+Starts a new `kimaki` process in the background:
+
+```bash
+kimaki [original args]
+```
+
+### New Process Takes Over
+
+The new process:
+1. Binds the lock port
+2. Detects the old process is running
+3. Sends SIGTERM to kill it
+4. Takes over all connections
+
+</Steps>
+
+<Note>
+**Graceful Restart**: Active sessions continue seamlessly. The new process reconnects to existing threads.
+</Note>
+
+### Version Display
+
+If already on the latest version:
+
+```
+Already on latest version: v1.0.8
+```
+
+After upgrade:
+
+```
+Upgraded kimaki v1.0.5 → v1.0.8. Restarting bot...
+```
+
+### Manual Restart
+
+You can also restart without upgrading:
+
+```bash
+# Find the process ID
+ps aux | grep kimaki
+
+# Send SIGUSR2 signal
+kill -SIGUSR2 <PID>
+```
+
+The bot restarts with the same version.
+
+## Queue Internals
+
+Kimaki manages queues in-memory:
+
+```typescript
+const messageQueues = new Map<string, QueuedMessage[]>()
+
+type QueuedMessage = {
+  prompt: string
+  userId: string
+  username: string
+  queuedAt: number
+  appId?: string
+  command?: { name: string; arguments: string }
+}
+```
+
+**Queue lifecycle**:
+1. User runs `/queue`
+2. Message added to `messageQueues.get(threadId)`
+3. Current session completes
+4. `session-handler` checks queue
+5. Pops first message and sends it
+6. Repeats until queue is empty
+
+**Queue clearing**:
+- `/clear-queue` empties the array
+- `/abort` clears the queue for that session
+- Bot restart clears all queues (in-memory only)
+
+## Best Practices
+
+<Accordion title="Use /queue for follow-ups">
+  When the AI is working, queue your next tasks instead of waiting:
+  
+  ```
+  AI: [implementing feature A...]
+  You: /queue message:"Now do feature B"
+  You: /queue message:"Then do feature C"
+  
+  → All three features complete without you waiting
+  ```
+</Accordion>
+
+<Accordion title="Undo early and often">
+  If the AI makes a mistake, undo immediately:
+  
+  ```
+  AI: [renames files incorrectly]
+  You: /undo
+  You: "Actually, keep the original names and just update the imports"
+  ```
+  
+  This is faster than asking the AI to fix it manually.
+</Accordion>
+
+<Accordion title="Upgrade regularly">
+  Run `/upgrade-and-restart` weekly to get:
+  - Bug fixes
+  - Performance improvements
+  - New features
+  
+  The upgrade is seamless with no downtime.
+</Accordion>
+
+## Error Handling
+
+Common errors and solutions:
+
+```
+No active session in this thread
+→ /queue, /clear-queue, /undo, /redo only work in session threads
+
+No messages to undo
+→ The session has no assistant messages yet
+
+Nothing to redo - no previous undo found
+→ Use /undo first, then /redo
+
+Failed to undo: not a git repository
+→ Undo requires git. Initialize a repo with `git init`
+
+Upgrade failed: permission denied
+→ Run with sudo: sudo npx kimaki@latest (for global install)
+```

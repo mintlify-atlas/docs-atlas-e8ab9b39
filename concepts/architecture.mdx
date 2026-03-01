@@ -1,0 +1,295 @@
+---
+title: System Architecture
+description: Understanding Kimaki's architecture, components, and data flow between Discord and OpenCode
+---
+
+# System Architecture
+
+Kimaki is a Discord bot that orchestrates OpenCode AI coding sessions. It acts as a bridge between Discord's messaging interface and OpenCode's AI-powered development environment.
+
+## Core Architecture
+
+### One Bot Per Machine
+
+Kimaki follows a **one bot per machine** architecture by design. Each Discord bot instance you create is tied to a single machine where it runs.
+
+```
+Discord Server
+├── Bot 1 (Machine A)
+│   ├── Project A channels
+│   └── Project B channels
+└── Bot 2 (Machine B)
+    ├── Project C channels
+    └── Project D channels
+```
+
+When you run `kimaki` on a computer:
+- It spawns OpenCode servers for projects on that machine
+- The bot can only access directories where it's running
+- Channel metadata stores which bot (app ID) owns each channel
+
+To control multiple machines:
+1. Create a separate Discord bot for each machine
+2. Run `kimaki` on each machine with its own bot token
+3. Add all bots to the same Discord server
+
+## Component Overview
+
+### Discord Bot (`discord-bot.ts`)
+
+The main event loop that handles Discord interactions:
+
+- **Message routing**: Routes messages from text channels and threads to OpenCode sessions
+- **Permission checks**: Validates user permissions (Server Owner, Administrator, Manage Server, or "Kimaki" role)
+- **Worktree management**: Creates isolated git worktrees for feature development
+- **Voice processing**: Transcribes voice messages using Gemini API
+
+### Session Handler (`session-handler.ts`)
+
+Manages the lifecycle of OpenCode sessions:
+
+- **Session creation/reuse**: Creates new sessions or reuses existing ones per thread
+- **Event streaming**: Subscribes to OpenCode SSE events for real-time updates
+- **Abort handling**: Manages session interrupts when new messages arrive
+- **Message queue**: Queues follow-up messages while AI is responding
+
+### OpenCode Server Manager (`opencode.ts`)
+
+Spawns and maintains OpenCode API servers:
+
+- **Per-directory servers**: One OpenCode server process per project directory
+- **Auto-restart**: Automatically restarts crashed servers with exponential backoff
+- **Port allocation**: Dynamically allocates ports for each server
+- **Health checks**: Monitors server health via `/api/health` endpoint
+
+### SQLite Database (`database.ts`)
+
+Persists state between bot restarts:
+
+```typescript
+// Key data stored
+- Channel → Directory mapping
+- Thread → Session mapping
+- Thread → Worktree mapping
+- Session preferences (model, agent)
+- Scheduled tasks
+```
+
+Database location: `<data-dir>/discord-sessions.db` (default: `~/.kimaki/discord-sessions.db`)
+
+### Channel Management (`channel-management.ts`)
+
+Handles Discord channel creation and metadata:
+
+- Creates text channels under "Kimaki" category
+- Creates voice channels under "Kimaki Audio" category
+- Stores channel configuration in SQLite (not in channel topic)
+- Maps channels to project directories
+
+## Data Flow
+
+### Message Flow: Discord → OpenCode
+
+```
+1. User sends message in Discord channel
+   ↓
+2. discord-bot.ts validates permissions
+   ↓
+3. Creates/reuses thread
+   ↓
+4. session-handler.ts creates/gets OpenCode session
+   ↓
+5. Initializes OpenCode server (if not running)
+   ↓
+6. Sends prompt via SDK: client.session.prompt()
+   ↓
+7. Subscribes to SSE events: client.event.subscribe()
+```
+
+### Response Flow: OpenCode → Discord
+
+```
+1. OpenCode emits SSE events
+   ↓
+2. session-handler.ts processes events:
+   - message.updated → buffer parts
+   - step-finish → flush buffered parts
+   - permission.request → show buttons
+   - question.request → show dropdowns
+   ↓
+3. Format parts as markdown
+   ↓
+4. Split long messages for Discord limits
+   ↓
+5. Send to thread via discord-utils.ts
+```
+
+## Process Architecture
+
+### Bot Process
+
+```bash
+# Single Node.js process running:
+- Discord gateway connection
+- SQLite database
+- Task runner (scheduled tasks)
+- Hrana server (remote DB access)
+- Voice worker thread
+```
+
+### OpenCode Server Processes
+
+```bash
+# Separate process per project directory:
+spawn('opencode', ['dev', '--port', dynamicPort], {
+  cwd: projectDirectory,
+  env: {
+    KIMAKI_DATA_DIR: dataDir,
+    KIMAKI_BOT_TOKEN: token,
+    KIMAKI_LOCK_PORT: lockPort,
+    ...(originalRepoDir && {
+      OPENCODE_ORIGINAL_REPO_DIRECTORY: originalRepoDir
+    })
+  }
+})
+```
+
+## Plugin System
+
+Kimaki extends OpenCode via plugins (`opencode-plugin.ts`):
+
+- Runs **inside OpenCode server process** (not bot process)
+- Cannot access bot-side config directly
+- Receives bot state via `KIMAKI_*` env vars
+- Provides custom tools: `kimaki_question`, `kimaki_action_buttons`, `kimaki_file_upload`
+
+<Warning>
+The OpenCode plugin runs in a separate process. Never export utility functions from `opencode-plugin.ts` - they'll be called as plugin initializers and crash. Move utilities to separate files.
+</Warning>
+
+## Lock Port & Single Instance
+
+Kimaki enforces single-instance behavior by binding a lock port:
+
+```typescript
+// Default: derived from data directory hash
+const lockPort = deriveLockPort(dataDir)
+
+// Override for multiple instances:
+KIMAKI_LOCK_PORT=31001 kimaki --data-dir ~/bot1
+KIMAKI_LOCK_PORT=31002 kimaki --data-dir ~/bot2
+```
+
+## Logging & Debugging
+
+### Log File
+
+Location: `<data-dir>/kimaki.log` (default: `~/.kimaki/kimaki.log`)
+
+- Reset on every bot startup
+- Contains logs from current run only
+- Use for debugging session failures and internal issues
+
+### Heap Snapshots
+
+```bash
+# Manual snapshot trigger
+kill -SIGUSR1 <PID>
+
+# Automatic: at 85% heap usage
+# Saved to: ~/.kimaki/heap-snapshots/
+```
+
+### Graceful Restart
+
+```bash
+# Restart with new code without losing connections
+kill -SIGUSR2 <PID>
+```
+
+## Multiple Instances
+
+Run multiple bot instances on the same machine:
+
+```bash
+# Instance 1 (default)
+kimaki
+
+# Instance 2 (separate data + port)
+KIMAKI_LOCK_PORT=31001 kimaki --data-dir ~/work-bot
+
+# Instance 3
+KIMAKI_LOCK_PORT=31002 kimaki --data-dir ~/personal-bot
+```
+
+Each instance has its own:
+- Database
+- Projects directory
+- Lock port
+- Discord bot credentials
+
+## Network Topology
+
+```
+Internet
+  ↓
+Discord Gateway (WebSocket)
+  ↓
+Kimaki Bot Process
+  ↓
+Localhost HTTP (dynamic ports)
+  ↓
+OpenCode Server Processes
+  ↓
+Local Filesystem
+```
+
+All OpenCode servers bind to `127.0.0.1` (localhost only) for security. Only the Kimaki bot process has network access to Discord.
+
+## Security Model
+
+- **Permission checks**: Every message validates Discord roles/permissions
+- **Tool permissions**: OpenCode `permission.ask` events trigger Discord buttons
+- **No remote code execution**: Users cannot run arbitrary commands without approval
+- **Isolated worktrees**: Each thread can use a separate git worktree
+- **Local-only servers**: OpenCode servers only bind to localhost
+
+## Performance Considerations
+
+### Connection Pool
+
+```typescript
+// Increased from default to prevent SSE deadlock
+setGlobalDispatcher(new Agent({ 
+  connections: 500,
+  headersTimeout: 0,
+  bodyTimeout: 0 
+}))
+```
+
+Each session holds an SSE connection. Without enough connections, regular HTTP requests (like `session.prompt`) get blocked.
+
+### Thread Message Queue
+
+```typescript
+const threadMessageQueue = new Map<string, Promise<void>>()
+```
+
+Serial queue per thread ensures messages (voice + text) are processed in Discord arrival order, not completion order.
+
+## Error Handling
+
+Kimaki uses `errore` for type-safe error handling throughout:
+
+```typescript
+const result = await errore.tryAsync(() => client.session.get({...}))
+if (result instanceof Error) {
+  // Handle error
+}
+// Use result.data
+```
+
+All errors are logged to:
+- Console (with prefixes like `[SESSION]`, `[OPENCODE]`)
+- Sentry (for production monitoring)
+- Log file (`kimaki.log`)

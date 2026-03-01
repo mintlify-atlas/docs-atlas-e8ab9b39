@@ -1,0 +1,323 @@
+---
+title: Memory
+description: Maintain persistent context across sessions using the MEMORY.md file for learnings, decisions, and preferences
+---
+
+# Memory
+
+Kimaki supports persistent memory across all sessions in a project via a special `MEMORY.md` file in your project root.
+
+## Overview
+
+The `MEMORY.md` file stores:
+
+- **Architectural decisions** ("Using JWT tokens with 15min expiry")
+- **Code style preferences** ("Prefer kebab-case filenames")
+- **Project context** ("User prefers errore-style error handling")
+- **Important learnings** ("Database migrations run via Prisma")
+- **Domain knowledge** ("Payment flow uses Stripe webhooks")
+
+The AI reads this file at session start and can update it to preserve knowledge.
+
+## How It Works
+
+<Steps>
+  <Step title="Create MEMORY.md">
+    Create a `MEMORY.md` file in your project root:
+    
+    ```bash
+    touch MEMORY.md
+    ```
+    
+    Or let the AI create it when needed.
+  </Step>
+  
+  <Step title="AI reads on session start">
+    Every OpenCode session automatically reads `MEMORY.md` if it exists.
+    
+    No flags or configuration needed.
+  </Step>
+  
+  <Step title="AI updates as needed">
+    The AI can edit `MEMORY.md` to store important context:
+    
+    - After making architectural decisions
+    - When learning project-specific patterns
+    - To remember user preferences
+  </Step>
+  
+  <Step title="Idle gap reminders">
+    After 10+ minute idle gaps, the AI is reminded to save important context before starting new work.
+  </Step>
+</Steps>
+
+## Example MEMORY.md
+
+```markdown
+# Project Memory
+
+## Architecture
+
+- Using JWT tokens with 15min expiry
+- Refresh tokens stored in httpOnly cookies
+- Database: PostgreSQL via Prisma ORM
+- Migrations run with `pnpm db:migrate`
+
+## Code Style
+
+- Filenames: kebab-case (e.g. `auth-utils.ts`)
+- Error handling: errore-style (errors as values)
+- Imports: absolute imports via `@/` alias
+- Functions: object arguments for 2+ params
+
+## Preferences
+
+- User prefers concise git commit messages
+- Run tests before committing
+- Use pnpm (not npm or yarn)
+
+## Domain Knowledge
+
+- Payment flow:
+  1. User clicks "Subscribe"
+  2. Stripe checkout session created
+  3. Webhook confirms payment
+  4. Database updated with subscription
+
+- Email sending:
+  - Transactional: Resend API
+  - Marketing: ConvertKit
+  - All templates in `emails/` directory
+
+## Recent Learnings
+
+- 2026-03-01: Added rate limiting to `/api/chat` (100 req/min per IP)
+- 2026-02-28: Migrated from Vercel to self-hosted on Railway
+```
+
+## Implementation Details
+
+From OpenCode plugin (`discord/src/opencode-plugin.ts`):
+
+```typescript
+const MEMORY_FILE_PATH = 'MEMORY.md'
+const IDLE_THRESHOLD_MS = 10 * 60 * 1000 // 10 minutes
+
+// Inject MEMORY.md content as initial context
+const memoryContent = await readMemoryFile(directory)
+
+if (memoryContent) {
+  systemParts.push({
+    type: 'text',
+    text: `<project-memory>\n${memoryContent}\n</project-memory>`,
+  })
+}
+
+// After idle gap, remind AI to update memory
+const lastMessageTime = getLastAssistantMessageTime(sessionMessages)
+const timeSinceLastMessage = Date.now() - lastMessageTime
+
+if (timeSinceLastMessage > IDLE_THRESHOLD_MS) {
+  const idleMinutes = Math.round(timeSinceLastMessage / 60000)
+  systemParts.push({
+    type: 'text',
+    text: `<idle-reminder>\nIt has been ${idleMinutes} minutes since your last message.\nIf this session established important context worth preserving, consider updating MEMORY.md before starting new work.\n</idle-reminder>`,
+  })
+}
+```
+
+## Memory Condensation
+
+The plugin includes a `condenseMemoryMd()` function (in `discord/src/condense-memory.ts`) that:
+
+1. Removes duplicate lines
+2. Deduplicates sections by fuzzy matching
+3. Keeps the file concise and readable
+
+This runs automatically when the AI updates `MEMORY.md`.
+
+## When to Update Memory
+
+The AI should update `MEMORY.md` when:
+
+<AccordionGroup>
+  <Accordion title="Architectural decisions made">
+    After choosing between implementation approaches:
+    
+    ```markdown
+    ## Architecture
+    
+    - Decided to use Redis for session storage (faster than DB queries)
+    - API rate limiting: 100 req/min per IP via upstash/ratelimit
+    ```
+  </Accordion>
+  
+  <Accordion title="Project patterns discovered">
+    After understanding how the codebase works:
+    
+    ```markdown
+    ## Patterns
+    
+    - All API routes return `{ data, error }` objects
+    - Database queries use errore.tryAsync for error handling
+    - Test files are colocated with source (e.g. `auth.ts` + `auth.test.ts`)
+    ```
+  </Accordion>
+  
+  <Accordion title="User preferences expressed">
+    When the user mentions preferences:
+    
+    > "I prefer functional components over classes"
+    
+    ```markdown
+    ## Preferences
+    
+    - React: functional components with hooks (no class components)
+    ```
+  </Accordion>
+  
+  <Accordion title="Important context before idle">
+    After a 10+ minute gap, save key learnings:
+    
+    ```markdown
+    ## Recent Work
+    
+    - 2026-03-01: Refactored auth to support OAuth (Google, GitHub)
+    - New env vars: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Memory Scope
+
+Memory is **per-project**:
+
+- Each project directory has its own `MEMORY.md`
+- Sessions in different projects don't share memory
+- Worktrees **share** memory with the main repo (same file)
+
+<Note>
+  Worktree sessions read/write the same `MEMORY.md` as the main repo because worktrees share the same file tree (different branches, same files).
+</Note>
+
+## Best Practices
+
+### Keep It Concise
+
+<Warning>
+  Don't dump entire conversations into `MEMORY.md`. Extract key decisions and patterns only.
+</Warning>
+
+Bad:
+
+```markdown
+User: Can you add auth?
+Assistant: Sure, I'll add JWT auth with refresh tokens...
+[300 lines of conversation]
+```
+
+Good:
+
+```markdown
+## Authentication
+
+- JWT access tokens (15min expiry)
+- Refresh tokens in httpOnly cookies (7 day expiry)
+- Auth middleware: `src/middleware/auth.ts`
+```
+
+### Use Sections
+
+Organize with clear headings:
+
+```markdown
+# Project Memory
+
+## Architecture
+...
+
+## Code Style
+...
+
+## API Endpoints
+...
+
+## Database Schema
+...
+
+## Deployment
+...
+```
+
+### Update Incrementally
+
+Add new learnings without removing old ones (unless outdated):
+
+```markdown
+## Recent Learnings
+
+- 2026-03-05: Added webhook retry logic (3 attempts with exponential backoff)
+- 2026-03-01: Migrated to Turso for database (was Supabase)
+- 2026-02-28: Switched to Bun from Node.js
+```
+
+### Avoid Duplicates
+
+The condensation function helps, but manually avoid repeating info:
+
+```markdown
+# Bad
+## Auth
+- Using JWT tokens
+
+## Security
+- JWT tokens for auth
+
+# Good
+## Auth
+- Using JWT tokens with 15min expiry
+- Refresh tokens in httpOnly cookies
+```
+
+## Disabling Memory
+
+There's no flag to disable memory. To stop using it:
+
+1. Delete `MEMORY.md`
+2. Or leave it empty
+
+The plugin only injects content if the file exists and has content.
+
+## Security Considerations
+
+<Warning>
+  Don't store secrets in `MEMORY.md`:
+  
+  - API keys
+  - Database passwords
+  - Private URLs
+  - Sensitive business logic
+</Warning>
+
+Good:
+
+```markdown
+## Email
+
+- Using Resend for transactional emails
+- API key stored in RESEND_API_KEY env var
+```
+
+Bad:
+
+```markdown
+## Email
+
+- Resend API key: re_abc123xyz (NEVER DO THIS)
+```
+
+## Related Features
+
+- [Text Messages](/features/text-messages) - How sessions are triggered
+- [Worktrees](/features/worktrees) - Isolated sessions (same memory)
+- [Scheduled Tasks](/features/scheduled-tasks) - Recurring tasks with memory

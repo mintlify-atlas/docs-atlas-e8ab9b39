@@ -1,0 +1,149 @@
+---
+title: Discord Bot Setup
+description: Create and configure your Discord bot with required intents and permissions
+---
+
+Kimaki requires a Discord bot application to connect Discord to OpenCode. This guide walks you through creating a bot, enabling required intents, and installing it in your server.
+
+## Create Discord Application
+
+<Steps>
+  <Step title="Navigate to Discord Developer Portal">
+    Go to [discord.com/developers/applications](https://discord.com/developers/applications) and sign in with your Discord account.
+  </Step>
+
+  <Step title="Create New Application">
+    Click **New Application** and give your application a name (e.g., "Kimaki Bot" or your machine name).
+  </Step>
+
+  <Step title="Note Your Application ID">
+    Your Application ID is displayed at the top of the General Information page. You'll need this later.
+  </Step>
+</Steps>
+
+## Configure Bot Intents
+
+Intents control what events your bot can receive from Discord. Kimaki requires specific privileged intents to function.
+
+<Steps>
+  <Step title="Navigate to Bot Section">
+    Click **Bot** in the left sidebar of your application settings.
+  </Step>
+
+  <Step title="Enable Required Intents">
+    Scroll down to **Privileged Gateway Intents** and enable:
+
+    - **SERVER MEMBERS INTENT** - Required to check user permissions
+    - **MESSAGE CONTENT INTENT** - Required to read message content
+
+    <Warning>
+      Both intents are required. The bot will not function without them.
+    </Warning>
+  </Step>
+
+  <Step title="Save Changes">
+    Click **Save Changes** at the bottom of the page.
+  </Step>
+</Steps>
+
+## Get Bot Token
+
+The bot token authenticates your Kimaki instance with Discord.
+
+<Steps>
+  <Step title="Reset Token">
+    In the **Bot** section, click **Reset Token** to generate a new token.
+
+    <Note>
+      If this is your first time, the button may say **Copy** instead of **Reset Token**.
+    </Note>
+  </Step>
+
+  <Step title="Copy Token">
+    Copy the token immediately. You won't be able to see it again without resetting.
+
+    <Warning>
+      Never share your bot token. Treat it like a password. Anyone with the token can control your bot.
+    </Warning>
+  </Step>
+
+  <Step title="Store Token Securely">
+    You'll paste this token when running `npx kimaki` for the first time, or set it as the `KIMAKI_BOT_TOKEN` environment variable for automated deployments.
+  </Step>
+</Steps>
+
+## Install Bot to Server
+
+Generate an invite URL with the correct permissions.
+
+<Steps>
+  <Step title="Get Install URL">
+    The Kimaki CLI generates an install URL with proper permissions during setup:
+
+    ```
+    https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&permissions=397552930880&scope=bot
+    ```
+
+    Replace `YOUR_APP_ID` with your Application ID, or let the CLI generate it for you.
+  </Step>
+
+  <Step title="Open URL in Browser">
+    Open the install URL in your browser. You'll see Discord's authorization page.
+  </Step>
+
+  <Step title="Select Server">
+    Choose the Discord server where you want to install the bot. You must have **Manage Server** permission.
+  </Step>
+
+  <Step title="Authorize Bot">
+    Review the permissions and click **Authorize**.
+
+    The bot will appear in your server's member list (offline until you start Kimaki).
+  </Step>
+</Steps>
+
+## Required Permissions
+
+The install URL includes these permissions:
+
+- **View Channels** - See channels in the server
+- **Send Messages** - Reply to user messages
+- **Create Public Threads** - Create threads for sessions
+- **Send Messages in Threads** - Reply in session threads
+- **Manage Channels** - Create project channels
+- **Manage Threads** - Archive threads when sessions end
+- **Attach Files** - Send file attachments in responses
+- **Read Message History** - Resume sessions and fork from history
+- **Add Reactions** - React to messages with status indicators
+- **Use External Emojis** - Optional, for better status indicators
+- **Mention Everyone** - Optional, allows the bot to mention @everyone if needed
+
+<Info>
+  The bot only uses permissions in channels it manages. It won't modify other channels.
+</Info>
+
+## Bot Token Storage
+
+Kimaki stores your bot token in `~/.kimaki/discord-sessions.db` by default.
+
+**Environment Variable (CI/Automation):**
+
+For headless deployments, set `KIMAKI_BOT_TOKEN` instead:
+
+```bash
+export KIMAKI_BOT_TOKEN="your_bot_token_here"
+npx kimaki
+```
+
+The environment variable takes precedence over the database.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Run Kimaki" icon="rocket" href="/quickstart">
+    Start the bot and create project channels
+  </Card>
+  <Card title="Configure Permissions" icon="shield" href="/configuration/opencode-config">
+    Customize tool permissions with opencode.json
+  </Card>
+</CardGroup>

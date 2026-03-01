@@ -1,0 +1,333 @@
+---
+title: Installation
+description: Detailed installation guide for Kimaki with all configuration options and setup paths.
+---
+
+Detailed installation and setup guide for Kimaki.
+
+## Prerequisites
+
+Kimaki automatically installs these tools if they're missing:
+
+- **OpenCode** - The AI coding agent ([opencode.ai](https://opencode.ai))
+- **Bun** - JavaScript runtime ([bun.sh](https://bun.sh))
+
+The CLI will prompt you to install them during first run.
+
+## Installation
+
+<Steps>
+  <Step title="Run the setup wizard">
+    ```bash
+    npx -y kimaki@latest
+    ```
+
+    The `-y` flag auto-confirms the npx prompt. First run takes longer as npm downloads the package.
+  </Step>
+
+  <Step title="Create Discord application">
+    When prompted, go to [discord.com/developers/applications](https://discord.com/developers/applications) and:
+
+    1. Click **"New Application"**
+    2. Give your application a name (this becomes your bot's name)
+    3. Navigate to the **"Bot"** section in the left sidebar
+  </Step>
+
+  <Step title="Enable required intents">
+    In the Bot section, scroll to **"Privileged Gateway Intents"** and enable:
+
+    - **SERVER MEMBERS INTENT** - Required to check user permissions
+    - **MESSAGE CONTENT INTENT** - Required to read messages you send
+
+    Click **"Save Changes"** at the bottom.
+
+    <Warning>
+    If you skip this step, the bot will connect but won't respond to messages.
+    </Warning>
+  </Step>
+
+  <Step title="Copy your bot token">
+    Still in the Bot section:
+
+    1. Click **"Reset Token"** to generate a new token
+    2. Copy the token (you won't be able to see it again)
+    3. Paste it into the CLI when prompted
+
+    <Note>
+    On macOS, pasting into the terminal may add escape characters. The CLI automatically strips these.
+    </Note>
+  </Step>
+
+  <Step title="Install bot to your server">
+    The CLI generates an install URL like:
+
+    ```
+    https://discord.com/oauth2/authorize?client_id=123...&scope=bot%20applications.commands&permissions=397284535360
+    ```
+
+    Open this URL in your browser and select which Discord server to add the bot to.
+
+    <Tip>
+    Create a dedicated Discord server for your coding agents. This keeps sessions separate and gives you full permission control.
+    </Tip>
+  </Step>
+
+  <Step title="Select projects to add">
+    The CLI shows all OpenCode projects on your machine. Select which ones to create Discord channels for:
+
+    ```bash
+    ? Select projects to create Discord channels for:
+    ◉ my-app (/Users/you/projects/my-app)
+    ◯ website (/Users/you/work/website)
+    ◉ discord-bot (/Users/you/bots/discord-bot)
+    ```
+
+    Use arrow keys and space to select, then press Enter.
+  </Step>
+
+  <Step title="Keep the process running">
+    After setup, you'll see:
+
+    ```bash
+    ┌  🚀 Ready to Use
+    │
+    │  Your kimaki channels are ready! Click any link below:
+    │
+    │  • #my-app: https://discord.com/channels/.../...
+    │  • #discord-bot: https://discord.com/channels/.../...
+    │
+    └
+
+    ✨ Setup complete! Listening for new messages...
+    ```
+
+    **Leave this process running.** If you close it, the bot stops working.
+
+    <Info>
+    On macOS, Kimaki runs `caffeinate -i` to prevent your system from sleeping while the bot is active.
+    </Info>
+  </Step>
+</Steps>
+
+## Configuration options
+
+### Data directory
+
+By default, Kimaki stores data in `~/.kimaki/`. Change this with:
+
+```bash
+npx kimaki --data-dir ~/my-bots/work-bot
+```
+
+Each data directory contains:
+
+- `discord-sessions.db` - SQLite database with bot credentials, channel mappings, session history
+- `kimaki.log` - Log file (reset on every restart, only contains current run)
+- `heap-snapshots/` - Memory debugging snapshots
+
+### Running multiple instances
+
+To run multiple bot instances on the same machine (e.g., for different teams):
+
+```bash
+# Instance 1 - uses default ~/.kimaki
+npx kimaki
+
+# Instance 2 - separate data directory + explicit lock port
+KIMAKI_LOCK_PORT=31001 npx kimaki --data-dir ~/work-bot
+
+# Instance 3 - another instance
+KIMAKI_LOCK_PORT=31002 npx kimaki --data-dir ~/personal-bot
+```
+
+<Warning>
+Always set a different `KIMAKI_LOCK_PORT` when running multiple instances. Otherwise the new process will kill active sessions from the first one.
+</Warning>
+
+### Verbosity
+
+Control how much output Kimaki shows in Discord threads:
+
+```bash
+npx kimaki --verbosity text-only
+```
+
+Options:
+- `tools-and-text` - Show all tool calls and AI responses
+- `text-and-essential-tools` - Default; show text and important tools only
+- `text-only` - Only show AI text responses, hide all tool calls
+
+### Mention mode
+
+Make the bot only respond when @mentioned:
+
+```bash
+npx kimaki --mention-mode
+```
+
+Useful in shared channels where you don't want every message to trigger a session.
+
+### Auto-restart on crash
+
+```bash
+npx kimaki --auto-restart
+```
+
+Automatically restart the bot if it crashes or gets OOM killed.
+
+### Automatic worktrees
+
+Create a git worktree for every new session:
+
+```bash
+npx kimaki --use-worktrees
+```
+
+Each session works in an isolated git worktree, making it easy to review and merge changes.
+
+### Voice channels
+
+Enable voice channels for each project (disabled by default):
+
+```bash
+npx kimaki --enable-voice-channels
+```
+
+### Disable Sentry reporting
+
+```bash
+npx kimaki --no-sentry
+```
+
+Kimaki sends error reports to Sentry by default. Use this flag to disable it.
+
+## Environment variables
+
+### `KIMAKI_BOT_TOKEN`
+
+Set your bot token via environment variable instead of interactive prompt:
+
+```bash
+KIMAKI_BOT_TOKEN=your-token-here npx kimaki
+```
+
+Useful for headless deployments or running the bot as a service.
+
+### `KIMAKI_LOCK_PORT`
+
+Override the lock port (default: derived from data directory path):
+
+```bash
+KIMAKI_LOCK_PORT=31001 npx kimaki --data-dir ~/work-bot
+```
+
+Required when running multiple instances on the same machine.
+
+## Post-installation
+
+### Set up permissions
+
+Only users with these Discord permissions can interact with the bot:
+
+- **Server Owner** - Full access
+- **Administrator** - Full access
+- **Manage Server** - Full access
+- **"Kimaki" role** - Create this role and assign to trusted users
+
+The bot automatically creates a "Kimaki" role on startup. Assign it to users who should trigger sessions.
+
+<Tip>
+Create a **"no-kimaki"** role to block specific users, even admins. This implements the "four-eyes principle" - removing the role is a deliberate action.
+</Tip>
+
+### Add more projects later
+
+To add channels for additional projects:
+
+```bash
+# Interactive: run setup again
+npx kimaki --add-channels
+
+# CLI: add specific directory
+npx kimaki project add /path/to/project
+
+# CLI: add current directory
+cd ~/my-project && npx kimaki project add
+```
+
+### Get install URL
+
+To get the bot install URL for adding to another server:
+
+```bash
+npx kimaki --install-url
+```
+
+## Troubleshooting
+
+### Bot connects but doesn't respond
+
+Check that you enabled both required intents:
+- SERVER MEMBERS INTENT
+- MESSAGE CONTENT INTENT
+
+Go to your Discord application → Bot section → Privileged Gateway Intents.
+
+### "No OpenCode projects found"
+
+Kimaki only shows projects that OpenCode knows about. Run an OpenCode session in your project first:
+
+```bash
+cd ~/my-project
+opencode "setup project"
+```
+
+Then run `npx kimaki --add-channels`.
+
+### Port already in use
+
+If you see "Lock port already in use", either:
+
+1. Another Kimaki instance is running - stop it first
+2. You're running multiple instances - set different `KIMAKI_LOCK_PORT` values
+
+### Check logs
+
+Kimaki writes detailed logs to `~/.kimaki/kimaki.log` (or `<data-dir>/kimaki.log`).
+
+The log file resets on every startup, so it only contains logs from the current run.
+
+## Upgrading
+
+Kimaki auto-upgrades in the background. To manually upgrade:
+
+```bash
+# Upgrade and restart the running bot
+npx kimaki upgrade
+
+# Upgrade without restarting
+npx kimaki upgrade --skip-restart
+```
+
+Or use the Discord command in any Kimaki channel:
+
+```
+/upgrade-and-restart
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="CLI commands" icon="terminal" href="/cli/overview">
+    Learn about CLI commands for automation
+  </Card>
+  <Card title="Best practices" icon="lightbulb" href="/guides/best-practices">
+    Set up roles, permissions, and workflows
+  </Card>
+  <Card title="Automation" icon="robot" href="/guides/ci-automation">
+    Trigger sessions from CI or cron jobs
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/concepts/architecture">
+    Understand how Kimaki works
+  </Card>
+</CardGroup>

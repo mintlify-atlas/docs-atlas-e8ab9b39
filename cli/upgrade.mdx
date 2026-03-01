@@ -1,0 +1,242 @@
+---
+title: kimaki upgrade
+description: Upgrade Kimaki to the latest version and optionally restart the bot
+---
+
+The `upgrade` command updates your Kimaki installation to the latest version and can automatically restart the running bot process.
+
+## Usage
+
+```bash
+kimaki upgrade
+```
+
+Upgrades Kimaki and restarts the bot process.
+
+## Skip restart
+
+Upgrade without restarting:
+
+```bash
+kimaki upgrade --skip-restart
+```
+
+Useful when you want to upgrade but manually restart later.
+
+## Command options
+
+<ParamField path="--skip-restart" type="boolean">
+  Skip the automatic bot restart after upgrading. You'll need to manually restart the bot to use the new version.
+</ParamField>
+
+## What happens during upgrade
+
+<Steps>
+  <Step title="Version check">
+    Queries npm registry for the latest Kimaki version
+  </Step>
+  
+  <Step title="Download and install">
+    Runs `npm install -g kimaki@latest` to install the new version
+  </Step>
+  
+  <Step title="Find running process">
+    Searches for the running Kimaki bot process by lock port
+  </Step>
+  
+  <Step title="Send restart signal">
+    Sends `SIGUSR2` to the bot process, triggering a graceful restart
+  </Step>
+  
+  <Step title="Bot restarts">
+    The bot process exits and restarts with the new version, preserving all state
+  </Step>
+</Steps>
+
+## Behavior
+
+### Version detection
+
+The upgrade command:
+
+1. Checks your current version from `package.json`
+2. Queries npm for the latest published version
+3. Compares versions
+4. Installs if a newer version exists
+5. Skips installation if you're already on the latest version
+
+### Graceful restart
+
+When the bot receives `SIGUSR2`:
+
+1. Waits 1000ms for in-flight requests to complete
+2. Closes database connections
+3. Stops OpenCode servers
+4. Exits with code 0
+5. Process manager (if used) or systemd restarts the bot automatically
+
+If you run Kimaki manually without a process manager, you'll need to restart it yourself:
+
+```bash
+kimaki
+```
+
+## Examples
+
+### Standard upgrade
+
+```bash
+kimaki upgrade
+```
+
+Output:
+```
+Checking for updates...
+Current version: 0.4.72
+Latest version: 0.5.0
+Upgrading to kimaki@0.5.0...
+
+Upgrade complete!
+Restarting bot process...
+```
+
+### Upgrade without restart
+
+```bash
+kimaki upgrade --skip-restart
+
+# Manually restart later
+kill -SIGUSR2 $(cat ~/.kimaki/kimaki.pid)
+```
+
+### Already up to date
+
+```bash
+$ kimaki upgrade
+Checking for updates...
+Current version: 0.5.0
+Latest version: 0.5.0
+Already on the latest version.
+```
+
+## In-Discord upgrade
+
+You can also upgrade from Discord with the `/upgrade-and-restart` slash command:
+
+```
+/upgrade-and-restart
+```
+
+This runs the same upgrade process but can be triggered from any Kimaki channel.
+
+## Manual restart
+
+If you need to restart the bot without upgrading:
+
+```bash
+kill -SIGUSR2 <pid>
+```
+
+Find the PID:
+
+```bash
+ps aux | grep kimaki
+# or
+cat ~/.kimaki/kimaki.pid  # if you store the PID
+```
+
+## Process management
+
+For production deployments, use a process manager to handle restarts:
+
+### With PM2
+
+```bash
+# Start with PM2
+pm2 start kimaki --name kimaki-bot
+
+# PM2 auto-restarts after SIGUSR2
+kimaki upgrade
+```
+
+### With systemd
+
+```ini /etc/systemd/system/kimaki.service
+[Unit]
+Description=Kimaki Discord Bot
+After=network.target
+
+[Service]
+Type=simple
+User=your-user
+WorkingDirectory=/home/your-user
+ExecStart=/usr/local/bin/kimaki
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Systemd automatically restarts the service after it exits from `SIGUSR2`.
+
+## Troubleshooting
+
+<Accordion title="Upgrade succeeds but bot doesn't restart">
+  If you're not using a process manager, the bot exits after `SIGUSR2` and won't auto-restart. Start it manually:
+  
+  ```bash
+  kimaki
+  ```
+</Accordion>
+
+<Accordion title="Error: Cannot find running bot process">
+  The bot isn't running or is using a different `--data-dir`. Check:
+  
+  ```bash
+  ps aux | grep kimaki
+  ```
+</Accordion>
+
+<Accordion title="Permission denied during install">
+  You may need sudo for global npm installs:
+  
+  ```bash
+  sudo kimaki upgrade
+  ```
+  
+  Or use a Node version manager (nvm, fnm) to avoid sudo.
+</Accordion>
+
+<Accordion title="Bot restarted but still shows old version">
+  The bot caches the version at startup. Force a full restart:
+  
+  ```bash
+  killall kimaki
+  kimaki
+  ```
+</Accordion>
+
+## Version history
+
+Check the [GitHub releases](https://github.com/remorses/kimaki/releases) for changelogs and breaking changes.
+
+## Best practices
+
+<Tip>
+  Set up a process manager (PM2, systemd) before upgrading in production. This ensures the bot restarts automatically.
+</Tip>
+
+<Note>
+  Test upgrades in a development environment first, especially for major version bumps.
+</Note>
+
+<Warning>
+  The upgrade process doesn't backup your database. If you've made manual modifications, back up `~/.kimaki/discord-sessions.db` first.
+</Warning>
+
+## Related
+
+- [Installation](/installation)
+- [Multiple instances](/configuration/multiple-instances)
+- [Slash command: /upgrade-and-restart](/slash-commands/utilities#upgrade-and-restart)

@@ -1,0 +1,144 @@
+---
+title: Slash Commands Overview
+description: Complete reference for all Kimaki Discord slash commands for managing AI coding sessions
+---
+
+Kimaki provides Discord slash commands to control OpenCode sessions directly from Discord. All commands use Discord's native autocomplete for file paths, agent names, and session IDs.
+
+## Command Categories
+
+### Session Management
+
+Create, resume, and control coding sessions:
+
+- `/session` - Start a new session with a prompt
+- `/resume` - Resume a previous session
+- `/abort` - Stop the current running session
+- `/fork` - Branch from any message in a session
+- `/share` - Generate a public URL to share a session
+
+### Worktree Commands
+
+Manage git worktrees for isolated development:
+
+- `/new-worktree` - Create a git worktree and start a session
+- `/merge-worktree` - Merge worktree commits into the default branch
+
+### Configuration
+
+Configure AI models, agents, and output settings:
+
+- `/model` - Change the AI model for a channel or session
+- `/agent` - Change the agent for a channel or session
+- `/verbosity` - Control output detail level
+- `/mention-mode` - Toggle mention-only mode for a channel
+
+### Utilities
+
+Queue management and maintenance:
+
+- `/queue` - Queue a message to send after the current response
+- `/clear-queue` - Clear all queued messages
+- `/undo` - Undo the last assistant message (revert file changes)
+- `/redo` - Redo the last undone message
+- `/upgrade-and-restart` - Upgrade Kimaki to the latest version
+
+## Command Scopes
+
+<Note>
+**Channel vs Thread**: Most commands behave differently depending on where you run them:
+
+- **In a text channel**: Affects all future sessions in that channel
+- **In a thread**: Affects only the current session in that thread
+</Note>
+
+### Session-Specific Commands
+
+These commands only work inside active session threads:
+
+- `/abort`, `/fork`, `/share`
+- `/queue`, `/clear-queue`
+- `/undo`, `/redo`
+
+### Configuration Commands
+
+These commands can be scoped to different levels:
+
+- **Session scope**: Applies only to the current thread's session
+- **Channel scope**: Applies to all new sessions in the channel
+- **Global scope**: Applies to all channels (default for new channels)
+
+## Autocomplete Features
+
+Kimaki provides intelligent autocomplete for:
+
+- **File paths** - Search your project files by name
+- **Agent names** - Pick from configured agents in `.opencode/agent/`
+- **Session IDs** - Find previous sessions by title and date
+- **Models** - Browse available AI models by provider
+
+## Common Workflows
+
+<Steps>
+
+### Starting a New Session
+
+1. Run `/session prompt:"Add user authentication"`
+2. Kimaki creates a thread and starts the session
+3. The AI begins working on your request
+
+### Switching Models Mid-Session
+
+1. Run `/model` in an active thread
+2. Select provider (e.g., Anthropic)
+3. Select model (e.g., claude-opus-4)
+4. Choose "This session only"
+5. Current request aborts and retries with the new model
+
+### Working in Isolation with Worktrees
+
+1. Run `/new-worktree name:feature-auth` in a channel
+2. Kimaki creates a thread with a git worktree
+3. All changes happen in the isolated worktree
+4. When done, run `/merge-worktree` to merge back
+
+</Steps>
+
+## Tips
+
+<Accordion title="Using file references with @">
+  When starting a session, reference files using `@filename` syntax:
+  
+  ```
+  /session prompt:"Review @src/auth.ts and add tests"
+  ```
+  
+  The autocomplete helps you find files quickly.
+</Accordion>
+
+<Accordion title="Chaining commands with /queue">
+  Queue multiple tasks while the AI is working:
+  
+  ```
+  /queue message:"Now add error handling"
+  /queue message:"Update the README"
+  ```
+  
+  Messages send automatically when the current response finishes.
+</Accordion>
+
+<Accordion title="Undo mistakes immediately">
+  If the AI makes unwanted changes, undo them:
+  
+  ```
+  /undo
+  ```
+  
+  This reverts file changes from the last assistant message. Use `/redo` if you change your mind.
+</Accordion>
+
+## Next Steps
+
+- [Session Management Commands](/slash-commands/session-management) - Detailed guide for session commands
+- [Worktree Commands](/slash-commands/worktree-commands) - Git worktree workflows
+- [Configuration Commands](/slash-commands/configuration) - Model and agent switching

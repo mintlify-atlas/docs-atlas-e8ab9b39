@@ -1,0 +1,147 @@
+---
+title: Text Messages
+description: Send text messages to trigger OpenCode sessions and interact with your coding agent through Discord
+---
+
+# Text Messages
+
+Kimaki's primary interaction method is simple text messages. Send any message in a channel linked to a project, and Kimaki creates a thread and starts an OpenCode session.
+
+## How It Works
+
+1. **Send a message** in any channel linked to a project directory
+2. **Kimaki creates a thread** with your message as the first prompt
+3. **OpenCode session starts** running in the project directory
+4. **AI responds** with file edits, command outputs, and explanations
+
+<Note>
+  Only users with proper permissions can trigger sessions. See [Permissions](/concepts/permissions) for details.
+</Note>
+
+## Message Format
+
+Messages are sent directly to OpenCode with Discord mentions resolved:
+
+- `<@userId>` becomes `@displayName`
+- `<@&roleId>` becomes `@roleName`
+- `<#channelId>` becomes `#channelName`
+
+This ensures the AI sees human-readable names instead of Discord IDs.
+
+## Long Messages
+
+Discord has a 2000 character limit for messages. For longer prompts:
+
+<Steps>
+  <Step title="Use Discord's built-in feature">
+    Click the **+** icon → **Send message as file**
+    
+    Kimaki automatically reads the file content as your message.
+  </Step>
+  
+  <Step title="Attach a text file">
+    Attach any `.txt`, `.md`, or other text file to your message.
+    
+    The file content is included in the session context.
+  </Step>
+</Steps>
+
+## Session Context
+
+Every message includes:
+
+- **Project directory** path from channel metadata
+- **Username** and user ID from Discord
+- **Channel topic** (if set) for additional context
+- **Worktree info** (if the thread is in a worktree)
+
+## Response Format
+
+The AI responds in Claude-style markdown with:
+
+- **Headings** with numbered steps
+- **Bold** for keywords and emphasis
+- **Code blocks** with syntax highlighting
+- **Lists** for multiple items
+- **Quotes** for notes and context
+
+<Note>
+  URLs are never wrapped in code blocks - they remain clickable as plain text or markdown links.
+</Note>
+
+## Tool Execution
+
+During a session, the AI can:
+
+- Read and edit files
+- Run terminal commands
+- Search your codebase
+- Create git commits
+- Use any OpenCode tools
+
+Tool calls appear as inline summaries in the response:
+
+```
+┣ bash npm install
+◼︎ edit src/index.ts (+5-2)
+◼︎ write package.json (15 lines)
+```
+
+## Continuing Conversations
+
+Send follow-up messages in the thread to continue the session:
+
+- **Same session** - maintains full conversation history
+- **File context** - AI remembers what it edited
+- **Tool state** - knows what commands were run
+
+## CLI Alternative
+
+You can also send messages programmatically:
+
+```bash
+# New thread
+kimaki send --channel <channel-id> --prompt "Add dark mode support"
+
+# Existing thread
+kimaki send --thread <thread-id> --prompt "Run the tests"
+
+# By session ID
+kimaki send --session <session-id> --prompt "Fix the error"
+```
+
+Long prompts (>2000 chars) are automatically sent as file attachments.
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Be specific with file paths">
+    Instead of: "fix the bug in the auth file"
+    
+    Use: "fix the timeout error in `src/auth/session.ts:142`"
+  </Accordion>
+  
+  <Accordion title="Include relevant context">
+    Mention error messages, stack traces, or specific requirements.
+    
+    The more context you provide, the better the AI can help.
+  </Accordion>
+  
+  <Accordion title="Use mentions for collaboration">
+    Tag team members with `@username` to notify them.
+    
+    The AI sees resolved names and can reference users in responses.
+  </Accordion>
+  
+  <Accordion title="Structure complex requests">
+    For multi-step tasks, use numbered lists or bullet points.
+    
+    This helps the AI understand task priorities and dependencies.
+  </Accordion>
+</AccordionGroup>
+
+## Related Features
+
+- [File Attachments](/features/file-attachments) - Attach images and files to prompts
+- [Voice Messages](/features/voice-messages) - Send voice messages for transcription
+- [Worktrees](/features/worktrees) - Isolate work in git worktrees

@@ -1,0 +1,342 @@
+---
+title: Worktree Commands
+description: Git worktree management for isolated AI coding sessions in separate branches
+---
+
+Worktree commands create isolated git branches for AI sessions, keeping changes separate from your main branch until you're ready to merge.
+
+## What are Worktrees?
+
+Git worktrees let you have multiple branches checked out simultaneously in different directories. Kimaki uses this to:
+
+- **Isolate changes**: Each worktree session works on its own branch
+- **Keep main clean**: Your main branch stays untouched during experimentation
+- **Easy cleanup**: Delete the worktree if you don't like the changes
+
+## /new-worktree
+
+Create a git worktree and start a session in it.
+
+### Parameters
+
+- `name` (optional) - Worktree name (derived from thread name if omitted)
+
+### Usage
+
+**From a text channel** (creates new thread):
+
+```
+/new-worktree name:"feature-auth"
+```
+
+**From an existing thread** (attaches worktree to current thread):
+
+```
+/new-worktree
+```
+
+If no name is provided in a thread, Kimaki derives it from the thread name.
+
+### Worktree Naming
+
+Kimaki formats worktree names automatically:
+
+- Converts to lowercase
+- Replaces spaces with hyphens
+- Removes special characters
+- Adds `opencode/kimaki-` prefix
+
+**Examples**:
+
+```
+"My Feature"        → opencode/kimaki-my-feature
+"Fix Bug #123"      → opencode/kimaki-fix-bug-123
+"Add Auth"          → opencode/kimaki-add-auth
+```
+
+### Behavior
+
+<Steps>
+
+### Create Thread Immediately
+
+Kimaki creates the thread right away so you can start typing:
+
+```
+🌳 Creating worktree: opencode/kimaki-feature-auth
+⏳ Setting up...
+```
+
+The thread title has a `⬦` prefix indicating it's an unmerged worktree:
+
+```
+⬦ worktree: opencode/kimaki-feature-auth
+```
+
+### Create Worktree in Background
+
+While you type, Kimaki:
+
+1. Creates a new git branch: `opencode/kimaki-feature-auth`
+2. Creates a worktree directory at `../.kimaki-worktrees/opencode-kimaki-feature-auth`
+3. Initializes all submodules in the worktree
+4. Stores worktree info in the database
+
+### Update Status
+
+When complete, the starter message updates:
+
+```
+🌳 Worktree: opencode/kimaki-feature-auth
+📁 `/path/to/worktree`
+🌿 Branch: `opencode/kimaki-feature-auth`
+```
+
+### React with Tree Emoji
+
+Kimaki adds a 🌳 reaction to the thread for easy identification.
+
+</Steps>
+
+### Transferring Uncommitted Changes
+
+When running `/new-worktree` in an existing thread, Kimaki detects uncommitted changes:
+
+```
+🌳 Creating worktree: opencode/kimaki-feature
+⏳ Setting up...
+📋 Will transfer uncommitted changes
+```
+
+It captures a git diff and applies it to the new worktree after creation:
+
+```
+✅ Changes applied
+```
+
+Or if the diff fails:
+
+```
+⚠️ Failed to apply changes
+```
+
+<Note>
+**Diff Capture**: Kimaki captures both staged and unstaged changes using `git diff HEAD` before creating the worktree.
+</Note>
+
+### Error Cases
+
+```
+Worktree `opencode/kimaki-feature` already exists at `/path/to/worktree`
+→ Choose a different name or delete the existing worktree
+
+This thread already has a worktree attached.
+→ Each thread can only have one worktree
+
+Invalid worktree name. Please use letters, numbers, and spaces.
+→ The name couldn't be sanitized to a valid git branch name
+```
+
+## /merge-worktree
+
+Merge worktree commits into the default branch using a squash-rebase workflow.
+
+### Parameters
+
+None.
+
+### Usage
+
+```
+/merge-worktree
+```
+
+### Merge Pipeline
+
+Kimaki uses a worktrunk-style merge process:
+
+<Steps>
+
+### Check for Uncommitted Changes
+
+If the worktree has uncommitted changes:
+
+```
+Merge failed: uncommitted changes in the worktree.
+Commit changes first, then run `/merge-worktree` again.
+```
+
+### Squash Commits
+
+All worktree commits are squashed into a single commit:
+
+```bash
+git reset --soft origin/main
+git commit -m "[branch-name] commit message"
+```
+
+### Rebase onto Default Branch
+
+The squashed commit is rebased onto the latest default branch:
+
+```bash
+git fetch origin
+git rebase origin/main
+```
+
+### Handle Conflicts
+
+If rebase conflicts occur, Kimaki asks the AI to resolve them:
+
+```
+Rebase conflict detected. Asking the model to resolve...
+```
+
+The AI receives a prompt:
+
+```
+A rebase conflict occurred while merging this worktree into the default branch.
+Please resolve the rebase conflicts:
+1. Check `git status` to see which files have conflicts
+2. Edit the conflicted files to resolve the merge markers
+3. Stage resolved files with `git add`
+4. Continue the rebase with `git rebase --continue`
+5. After the rebase completes successfully, tell me so I can run `/merge-worktree` again
+```
+
+### Push to Default Branch
+
+After a successful rebase:
+
+```bash
+git push origin main:main
+```
+
+### Update Thread
+
+Kimaki removes the `⬦` prefix from the thread title:
+
+```
+Before: ⬦ worktree: opencode/kimaki-feature-auth
+After:  worktree: opencode/kimaki-feature-auth
+```
+
+And shows the merge result:
+
+```
+Merged `opencode/kimaki-feature-auth` into `main` @ abc1234 (5 commits)
+Worktree now at detached HEAD.
+```
+
+</Steps>
+
+<Warning>
+**Detached HEAD**: After merging, the worktree is left at a detached HEAD. You can:
+- Continue using it for more changes (it will rebase again)
+- Delete it manually with `git worktree remove`
+- Create a new worktree with `/new-worktree`
+</Warning>
+
+### Conflict Resolution Flow
+
+When conflicts occur:
+
+1. Kimaki queues or sends a prompt asking the AI to resolve conflicts
+2. The AI inspects `git status`, edits conflicted files, and runs `git rebase --continue`
+3. After the rebase succeeds, the AI tells you
+4. You run `/merge-worktree` again to complete the push
+
+<Note>
+**Automatic Queueing**: If a session is actively streaming when `/merge-worktree` detects conflicts, the conflict resolution prompt is queued automatically.
+</Note>
+
+## Worktree Workflows
+
+<Accordion title="Feature development">
+  Use worktrees for new features:
+  
+  ```
+  1. /new-worktree name:"user-profiles"
+  2. Implement the feature in the worktree thread
+  3. /merge-worktree to merge into main
+  4. Delete the worktree: git worktree remove ../worktrees/opencode-kimaki-user-profiles
+  ```
+</Accordion>
+
+<Accordion title="Experimental changes">
+  Try risky changes without affecting main:
+  
+  ```
+  1. /new-worktree name:"refactor-db"
+  2. Let the AI refactor in isolation
+  3. Review the changes
+  4. If good: /merge-worktree
+  5. If bad: just delete the worktree and thread
+  ```
+</Accordion>
+
+<Accordion title="Parallel development">
+  Work on multiple features simultaneously:
+  
+  ```
+  Thread 1: /new-worktree name:"feature-a"
+  Thread 2: /new-worktree name:"feature-b"
+  
+  Both can work at the same time without conflicts.
+  ```
+</Accordion>
+
+## Worktree Storage
+
+Worktrees are created in a sibling directory:
+
+```
+project/
+  .git/
+  src/
+  ../.kimaki-worktrees/
+    opencode-kimaki-feature-a/
+    opencode-kimaki-feature-b/
+```
+
+This keeps them outside the main repository but easy to find.
+
+## Database Tracking
+
+Kimaki tracks worktrees in SQLite:
+
+```sql
+CREATE TABLE thread_worktrees (
+  thread_id TEXT PRIMARY KEY,
+  worktree_name TEXT NOT NULL,
+  project_directory TEXT NOT NULL,
+  worktree_directory TEXT,  -- NULL until ready
+  status TEXT NOT NULL,     -- 'pending' | 'ready' | 'error'
+  error_message TEXT,
+  created_at INTEGER NOT NULL
+)
+```
+
+**Status values**:
+- `pending` - Worktree creation in progress
+- `ready` - Worktree created successfully
+- `error` - Creation failed (see `error_message`)
+
+## Best Practices
+
+<Note>
+**One Worktree Per Feature**: Keep worktree sessions focused on a single feature or fix. Merge frequently to avoid long-lived branches.
+</Note>
+
+<Note>
+**Submodule Support**: Kimaki automatically initializes submodules in worktrees. The process may take a few seconds for repos with many submodules.
+</Note>
+
+<Warning>
+**Worktree Cleanup**: Kimaki doesn't automatically delete worktrees after merging. Clean up old worktrees with:
+
+```bash
+git worktree list
+git worktree remove path/to/worktree
+```
+</Warning>

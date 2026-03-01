@@ -1,0 +1,430 @@
+---
+title: Channels and Threads
+description: How Discord channels map to projects, thread lifecycle, and worktree management
+---
+
+# Channels and Threads
+
+Kimaki uses Discord's channel and thread features to organize AI coding sessions by project.
+
+## Channel Structure
+
+### Text Channels
+
+Each project gets a text channel under the "Kimaki" category:
+
+```
+Discord Server
+└── Kimaki (category)
+    ├── #my-project
+    ├── #website
+    └── #api-server
+```
+
+Channel names are derived from the project directory basename:
+
+```typescript
+const channelName = path.basename(projectDirectory)
+  .toLowerCase()
+  .replace(/[^a-z0-9-]/g, '-')
+  .slice(0, 100)
+```
+
+### Voice Channels (Optional)
+
+Voice channels are created in a separate "Kimaki Audio" category:
+
+```
+Discord Server
+├── Kimaki (category)
+│   └── #my-project
+└── Kimaki Audio (category)
+    └── 🔊 my-project
+```
+
+Voice channels enable real-time voice message transcription using Gemini API.
+
+## Channel Configuration
+
+### Database Storage
+
+Channel configuration is stored in SQLite, not in the channel topic:
+
+```typescript
+// channels table
+{
+  channel_id: string    // Discord channel ID
+  directory: string     // Project directory path
+  channel_type: 'text' | 'voice'
+  app_id: string        // Bot application ID
+  mention_mode: boolean // Require @mention to trigger
+  worktrees_enabled: boolean
+  verbosity: 'text-only' | 'text-and-essential-tools' | 'tools-and-text'
+}
+```
+
+### Creating Channels
+
+Channels are created via:
+
+1. **Setup wizard**: `npx kimaki` (interactive)
+2. **CLI command**: `kimaki project add /path/to/project`
+3. **Slash command**: `/add-project` in Discord
+
+```typescript
+await createProjectChannels({
+  guild,
+  projectDirectory: '/path/to/project',
+  appId: 'bot-app-id',
+  enableVoiceChannels: true
+})
+```
+
+## Thread Lifecycle
+
+### Thread Creation
+
+When a user sends a message in a project channel:
+
+```typescript
+// discord-bot.ts: MessageCreate handler
+1. Validate user permissions
+2. Create thread from message:
+   - Name: first 80 chars of message
+   - Auto-archive: 1 day
+3. Add user to thread (appears in sidebar)
+4. Start OpenCode session
+```
+
+### Thread Types
+
+#### Standard Thread
+
+```
+User message → Create thread → Start session
+```
+
+#### Worktree Thread
+
+If worktrees are enabled (channel setting or CLI flag):
+
+```
+1. Create thread with "⬦" prefix
+2. Create git worktree:
+   - Branch: opencode/<sanitized-name>
+   - Directory: ../.worktrees/<name>
+3. React with 🌳 emoji
+4. Start session in worktree directory
+```
+
+Worktree status is tracked in SQLite:
+
+```typescript
+// worktrees table
+{
+  thread_id: string
+  worktree_name: string
+  worktree_directory: string
+  project_directory: string
+  status: 'pending' | 'ready' | 'error'
+  error_message?: string
+}
+```
+
+### Thread Mapping
+
+Each thread maps to exactly one OpenCode session:
+
+```typescript
+// thread_sessions table
+{
+  thread_id: string    // Discord thread ID
+  session_id: string   // OpenCode session ID
+}
+```
+
+This mapping persists across bot restarts. Replying to an old thread resumes the same session.
+
+## Message Flow in Threads
+
+### First Message (New Thread)
+
+```typescript
+1. User sends message in #project channel
+2. Bot creates thread from message
+3. session-handler.ts:
+   - Creates new OpenCode session
+   - Stores thread → session mapping
+   - Starts AI response stream
+```
+
+### Follow-up Messages (Existing Thread)
+
+```typescript
+1. User sends message in thread
+2. Bot looks up session ID for thread
+3. If session found:
+   - Aborts current request (if running)
+   - Sends new prompt to existing session
+4. If no session:
+   - Treats as notification thread
+   - Creates new session on reply
+```
+
+### Message Queue
+
+If a message arrives while AI is responding:
+
+```typescript
+// Queue the message
+const queue = messageQueue.get(threadId) || []
+queue.push({
+  prompt,
+  userId,
+  username,
+  queuedAt: Date.now(),
+  images
+})
+
+// Abort current request
+abortController.abort(new SessionAbortError({ 
+  reason: 'new-request' 
+}))
+
+// New message processes immediately
+// Queued messages auto-drain after completion
+```
+
+## Thread-Level Features
+
+### Per-Thread Serial Processing
+
+```typescript
+const threadMessageQueue = new Map<string, Promise<void>>()
+
+// Chain messages to process in arrival order
+const prev = threadMessageQueue.get(thread.id)
+const task = (prev || Promise.resolve())
+  .then(() => processThreadMessage())
+  .finally(() => threadMessageQueue.delete(thread.id))
+```
+
+This ensures voice transcription + text messages are processed in Discord arrival order, not completion order.
+
+### Shell Commands
+
+Messages starting with `!` run shell commands instead of AI:
+
+```typescript
+if (message.content?.startsWith('!')) {
+  const shellCmd = message.content.slice(1).trim()
+  const result = await runShellCommand({
+    command: shellCmd,
+    directory: worktreeDir || projectDir
+  })
+  await message.reply(result)
+  return
+}
+```
+
+Example:
+```
+!git status
+!npm run build
+!ls -la
+```
+
+### Mention Mode
+
+Channels can require `@mention` to trigger sessions:
+
+```typescript
+const mentionModeEnabled = await getChannelMentionMode(channelId)
+if (mentionModeEnabled) {
+  const botMentioned = message.mentions.has(discordClient.user.id)
+  const isShellCommand = message.content?.startsWith('!')
+  if (!botMentioned && !isShellCommand) {
+    return // Ignore message
+  }
+}
+```
+
+Useful for shared channels where the bot should only respond when explicitly called.
+
+## Worktree Management
+
+### Creating Worktrees
+
+Worktrees are created automatically when:
+
+1. Channel has `worktrees_enabled` setting
+2. CLI uses `--worktrees` flag
+3. User runs `/new-worktree` command
+4. CLI uses `--worktree <name>` option
+
+```typescript
+await createWorktreeWithSubmodules({
+  directory: projectDirectory,
+  name: worktreeName // e.g., "feature-auth"
+})
+
+// Creates:
+// - Branch: opencode/feature-auth
+// - Directory: ../.worktrees/feature-auth
+// - Initializes submodules
+```
+
+### Worktree Status Tracking
+
+```typescript
+const worktreeInfo = await getThreadWorktree(threadId)
+
+if (worktreeInfo?.status === 'pending') {
+  await message.reply('⏳ Worktree is still being created...')
+  return
+}
+
+if (worktreeInfo?.status === 'error') {
+  await message.reply(`❌ Worktree creation failed: ${error}`)
+  return
+}
+
+if (worktreeInfo?.status === 'ready') {
+  // Use worktree directory for session
+  sessionDirectory = worktreeInfo.worktree_directory
+}
+```
+
+### Merging Worktrees
+
+Use `/merge-worktree` to merge back to main branch:
+
+```typescript
+1. Verify thread has worktree
+2. Switch to main/master branch
+3. Merge worktree branch
+4. Delete worktree branch
+5. Remove worktree directory
+```
+
+## Bot-Initiated Threads
+
+Threads can be created programmatically:
+
+```bash
+# CLI command
+kimaki send \
+  --channel 123456789 \
+  --prompt "Fix the bug in auth.ts" \
+  --worktree fix-auth
+
+# GitHub Actions
+env:
+  KIMAKI_BOT_TOKEN: ${{ secrets.KIMAKI_BOT_TOKEN }}
+run: |
+  kimaki send \
+    --channel $CHANNEL_ID \
+    --prompt "Investigate issue ${{ github.event.issue.url }}"
+```
+
+The CLI creates a thread with a YAML marker in the embed footer:
+
+```yaml
+start: true
+worktree: "fix-auth"
+username: "github-actions"
+userId: "bot"
+agent: "opencode"
+model: "anthropic/claude-sonnet-4"
+```
+
+The bot's `ThreadCreate` handler reads this marker and auto-starts the session.
+
+## Thread Cleanup
+
+Threads auto-archive after 1 day of inactivity (Discord default). The session mapping persists in SQLite, so replying to an archived thread resumes the same session.
+
+Manual cleanup:
+
+```typescript
+// Delete thread → session mapping
+DELETE FROM thread_sessions WHERE thread_id = ?
+
+// Delete worktree mapping
+DELETE FROM worktrees WHERE thread_id = ?
+```
+
+OpenCode sessions remain accessible in the OpenCode TUI even after thread deletion.
+
+## Best Practices
+
+### Dedicated Server
+
+Create a dedicated Discord server for your agents:
+- Keeps coding sessions separate from other servers
+- Full control over permissions
+- Clear organization with one server for all machines
+
+### Naming Conventions
+
+- **Text channels**: Project name (e.g., `#website`, `#api-server`)
+- **Worktree threads**: Prefixed with "⬦" + feature name
+- **Voice threads**: "Voice Message" + timestamp
+
+### Permission Management
+
+Use the "Kimaki" role for team access:
+
+```typescript
+// Create role in Discord
+// Assign to trusted users
+// Bot checks for:
+- Server Owner
+- Administrator
+- Manage Server
+- "Kimaki" role
+```
+
+Block access with "no-kimaki" role:
+
+```typescript
+// Overrides all other permissions
+// Implements "four-eyes principle"
+// User must remove role to interact
+```
+
+### Multi-Agent Orchestration
+
+Allow other bots to trigger sessions:
+
+```typescript
+// Assign "Kimaki" role to bot
+// Bot messages will trigger sessions
+// Enables orchestrator bots
+```
+
+By default, bot messages are ignored to prevent loops.
+
+## Troubleshooting
+
+### Thread Not Responding
+
+1. Check if channel has project directory configured
+2. Verify bot has permission to create threads
+3. Check `kimaki.log` for errors
+4. Ensure OpenCode server is running for that directory
+
+### Worktree Creation Failed
+
+- Check if project is a git repository
+- Ensure no uncommitted changes in main branch
+- Verify disk space for worktree directory
+- Check git version (needs submodule support)
+
+### Session Mapping Lost
+
+If thread → session mapping is lost (e.g., database deleted):
+
+1. New message in thread creates new session
+2. Old session remains in OpenCode TUI
+3. Use `/resume` command to switch sessions

@@ -1,0 +1,178 @@
+---
+title: kimaki upload-to-discord
+description: Upload files to Discord threads from the command line
+---
+
+The `upload-to-discord` command uploads local files to a Discord thread, making them available as context for the AI session.
+
+## Usage
+
+```bash
+kimaki upload-to-discord --session <session-id> <file1> [file2...]
+```
+
+## Uploading files to a session
+
+```bash
+kimaki upload-to-discord \
+  --session abc123 \
+  logs/error.log \
+  screenshots/bug.png
+```
+
+This uploads `error.log` and `bug.png` to the Discord thread mapped to session `abc123`.
+
+## Command options
+
+<ParamField path="--session" type="string" required>
+  OpenCode session ID. The command looks up the Discord thread associated with this session and uploads files there.
+</ParamField>
+
+<ParamField path="files" type="string[]" required>
+  One or more file paths to upload. Supports any file type Discord accepts (images, text, PDFs, etc.).
+</ParamField>
+
+## Environment variables
+
+<ParamField path="KIMAKI_BOT_TOKEN" type="string">
+  Discord bot token. Required when running outside the bot process (e.g., in CI).
+</ParamField>
+
+## Supported file types
+
+Kimaki uploads any file type Discord supports:
+
+- **Images**: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic`
+- **Text**: `.txt`, `.md`, `.log`, `.json`, `.yaml`, `.toml`
+- **Code**: `.js`, `.ts`, `.py`, `.go`, `.rs`, etc.
+- **Documents**: `.pdf`, `.csv`
+- **Archives**: `.zip`, `.tar.gz`
+
+Large images are automatically resized and converted to JPEG to stay under Discord's file size limits.
+
+## Examples
+
+### Upload logs from CI
+
+After a test failure, upload the log file to the session:
+
+```yaml .github/workflows/test.yml
+- name: Upload test logs on failure
+  if: failure()
+  env:
+    KIMAKI_BOT_TOKEN: ${{ secrets.KIMAKI_BOT_TOKEN }}
+  run: |
+    npx -y kimaki upload-to-discord \
+      --session ${{ env.SESSION_ID }} \
+      test-results/junit.xml \
+      logs/test-output.log
+```
+
+### Upload screenshot
+
+```bash
+kimaki upload-to-discord \
+  --session abc123 \
+  ~/Desktop/screenshot.png
+```
+
+### Upload multiple files
+
+```bash
+kimaki upload-to-discord \
+  --session abc123 \
+  config.yaml \
+  .env.example \
+  package.json
+```
+
+### Upload all logs in a directory
+
+```bash
+kimaki upload-to-discord \
+  --session abc123 \
+  logs/*.log
+```
+
+## Behavior
+
+1. **Session lookup**: Queries the database to find the Discord thread for the session
+2. **File reading**: Reads each file from the filesystem
+3. **Upload**: Sends files to Discord via the REST API
+4. **Processing**: The AI session receives the files and can reference them
+
+<Note>
+  Files are uploaded to Discord immediately. The AI doesn't automatically process them unless you send a follow-up message referencing the files.
+</Note>
+
+## File processing
+
+Once uploaded, Kimaki processes files based on type:
+
+- **Images**: Resized to 2048x2048 max, converted to JPEG, included in AI vision context
+- **Text files**: Content extracted and wrapped in XML with filename metadata
+- **Other files**: Available for download but not processed by AI
+
+## Size limits
+
+Discord has file size limits:
+
+- **Standard servers**: 25 MB per file
+- **Boosted servers**: 50-500 MB depending on boost level
+
+Kimaki automatically compresses images to stay under limits. For other large files, consider uploading to external storage and sharing the link instead.
+
+## Use cases
+
+### Debugging with logs
+
+```bash
+# Start a debugging session
+kimaki send --channel 123 --prompt "Debug the authentication error"
+
+# Upload error logs
+kimaki upload-to-discord --session abc123 logs/auth-error.log
+
+# Ask AI to analyze
+kimaki send --session abc123 --prompt "Analyze the error log"
+```
+
+### Design review with screenshots
+
+```bash
+kimaki send --channel 123 --prompt "Review the new dashboard design"
+kimaki upload-to-discord --session abc123 designs/*.png
+```
+
+### Configuration debugging
+
+```bash
+kimaki upload-to-discord --session abc123 \
+  .env.example \
+  config/database.yml \
+  docker-compose.yml
+```
+
+## Troubleshooting
+
+<Accordion title="Error: Session not found">
+  The session ID doesn't exist in the database. Check the session ID with `/session-id` in Discord or by inspecting the database.
+</Accordion>
+
+<Accordion title="Error: Thread not found">
+  The Discord thread associated with the session no longer exists (possibly deleted). You can't upload to deleted threads.
+</Accordion>
+
+<Accordion title="File too large">
+  Discord rejected the file due to size limits. Compress images, split large files, or use external storage.
+</Accordion>
+
+<Accordion title="Upload succeeds but AI doesn't see files">
+  Send a follow-up message after uploading to prompt the AI to process the new files.
+</Accordion>
+
+## Related
+
+- [File attachments](/features/file-attachments)
+- [CI automation](/guides/ci-automation)
+- [Send command](/cli/send)

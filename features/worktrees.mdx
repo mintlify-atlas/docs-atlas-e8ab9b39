@@ -1,0 +1,314 @@
+---
+title: Git Worktrees
+description: Isolate coding sessions in separate git worktrees for parallel development without conflicts
+---
+
+# Git Worktrees
+
+Kimaki uses git worktrees to create isolated development environments for each session, allowing multiple coding tasks to run in parallel without conflicts.
+
+## What Are Worktrees?
+
+Git worktrees let you check out multiple branches simultaneously in separate directories:
+
+```
+my-project/          # main branch
+~/.local/share/opencode/worktree/abc123/
+  feature-auth/      # feature branch
+  bugfix-timeout/    # another feature branch
+```
+
+Each worktree:
+
+- Has its own **working directory**
+- Shares the same **git history**
+- Can have **different branches** checked out
+- Isolated **file changes** from other worktrees
+
+## Creating Worktrees
+
+<Warning>
+  Only create worktrees when explicitly needed. Most tasks work fine in normal threads without isolation.
+</Warning>
+
+### From Discord
+
+Use the `/new-worktree` command:
+
+```
+/new-worktree feature-name
+```
+
+This creates:
+
+1. A new Discord thread (named `⬦ feature-name`)
+2. A git worktree in `~/.local/share/opencode/worktree/<hash>/feature-name`
+3. A new branch `feature-name` from your default branch
+4. An OpenCode session in the worktree directory
+
+### From CLI
+
+```bash
+kimaki send --channel <channel-id> --prompt "Add dark mode" --worktree dark-mode
+```
+
+<Note>
+  The `--worktree` flag should only be used when you explicitly want isolation. Never use it by default.
+</Note>
+
+## Implementation Details
+
+From `discord/src/worktree-utils.ts:350-438`:
+
+<Steps>
+  <Step title="Resolve target branch">
+    ```typescript
+    const targetRef = await resolveDefaultWorktreeTarget(directory)
+    // Returns: origin/HEAD, main, master, or HEAD
+    ```
+  </Step>
+  
+  <Step title="Create worktree directory">
+    ```typescript
+    const worktreeDir = getManagedWorktreeDirectory({ directory, name })
+    // Returns: ~/.local/share/opencode/worktree/<project-hash>/<name>
+    
+    const createCommand = `git worktree add "${worktreeDir}" -B "${name}" "${targetRef}"`
+    await execAsync(createCommand, { cwd: directory })
+    ```
+  </Step>
+  
+  <Step title="Apply diff (if creating from existing thread)">
+    ```typescript
+    if (diff) {
+      logger.log(`Applying diff to ${worktreeDir} before submodule init`)
+      diffApplied = await applyGitDiff(worktreeDir, diff)
+    }
+    ```
+  </Step>
+  
+  <Step title="Remove broken submodule stubs">
+    Git worktree creates incomplete submodule directories. These are cleaned before init.
+    
+    ```typescript
+    await removeBrokenSubmoduleStubs(worktreeDir)
+    ```
+  </Step>
+  
+  <Step title="Initialize submodules">
+    ```typescript
+    await execAsync('git submodule update --init --recursive', {
+      cwd: worktreeDir,
+      timeout: 20 * 60_000, // 20 minutes
+    })
+    ```
+  </Step>
+  
+  <Step title="Validate submodule pointers">
+    Ensures all submodule `.git` files point to valid git directories.
+    
+    ```typescript
+    const submoduleValidationError = await validateSubmodulePointers(worktreeDir)
+    if (submoduleValidationError instanceof Error) {
+      return submoduleValidationError
+    }
+    ```
+  </Step>
+</Steps>
+
+## Diff Capture and Transfer
+
+When creating a worktree from an existing thread with uncommitted changes, Kimaki captures the diff and applies it to the new worktree:
+
+```typescript
+export async function captureGitDiff(
+  directory: string,
+): Promise<CapturedDiff | null> {
+  // Capture unstaged changes
+  const unstagedResult = await execAsync('git diff', { cwd: directory })
+  const unstaged = unstagedResult.stdout.trim()
+  
+  // Capture staged changes
+  const stagedResult = await execAsync('git diff --staged', { cwd: directory })
+  const staged = stagedResult.stdout.trim()
+  
+  if (!unstaged && !staged) {
+    return null
+  }
+  
+  return { unstaged, staged }
+}
+```
+
+Diff is applied **before** submodule init to ensure submodule pointer changes are respected.
+
+## Merging Worktrees
+
+Use `/merge-worktree` to merge changes back to the default branch:
+
+```
+/merge-worktree
+```
+
+This implements a **worktrunk-style** merge pipeline from `worktree-utils.ts:784-988`:
+
+<Steps>
+  <Step title="Validate no uncommitted changes">
+    ```typescript
+    if (await isDirty(worktreeDir)) {
+      return new DirtyWorktreeError()
+    }
+    ```
+  </Step>
+  
+  <Step title="Squash commits">
+    All commits since merge-base are squashed into one:
+    
+    ```typescript
+    const squashMessage = buildSquashMessage({
+      branchName: worktreeName || branchName,
+      commitMessages,
+    })
+    // Format:
+    // worktree merge: feature-name
+    //
+    // - Original commit message 1
+    // - Original commit message 2
+    ```
+  </Step>
+  
+  <Step title="Rebase onto default branch">
+    ```typescript
+    await git(worktreeDir, `rebase "${defaultBranch}"`)
+    ```
+    
+    If conflicts occur, a `RebaseConflictError` is returned and git is left mid-rebase for the AI to resolve.
+  </Step>
+  
+  <Step title="Fast-forward push to main repo">
+    Uses `receive.denyCurrentBranch=updateInstead` to push without checking out:
+    
+    ```typescript
+    await git(
+      worktreeDir,
+      `push --receive-pack="git -c receive.denyCurrentBranch=updateInstead receive-pack" "${gitCommonDir}" "HEAD:${defaultBranch}"`,
+    )
+    ```
+  </Step>
+  
+  <Step title="Clean up worktree">
+    ```typescript
+    await git(worktreeDir, `checkout --detach "${defaultBranch}"`)
+    await git(worktreeDir, `branch -D "${branchName}"`)
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The merge process never checks out the main branch in the main repo, avoiding disruption to any active work there.
+</Note>
+
+## Worktree Locations
+
+Worktrees are stored outside the main repository:
+
+```typescript
+function getManagedWorktreeDirectory({
+  directory,
+  name,
+}: {
+  directory: string
+  name: string
+}): string {
+  const projectHash = crypto.createHash('sha1').update(directory).digest('hex')
+  const safeName = name.replaceAll('/', '-')
+  return path.join(
+    os.homedir(),
+    '.local',
+    'share',
+    'opencode',
+    'worktree',
+    projectHash,
+    safeName,
+  )
+}
+```
+
+Example:
+
+```
+~/.local/share/opencode/worktree/
+  a1b2c3d4e5f6/          # hash of project directory
+    feature-auth/        # worktree for "feature-auth"
+    bugfix-timeout/      # worktree for "bugfix-timeout"
+```
+
+## Submodule Handling
+
+Git worktree creates broken submodule stubs that must be cleaned before `git submodule update`:
+
+```typescript
+async function removeBrokenSubmoduleStubs(directory: string): Promise<void> {
+  const submodulePaths = await getSubmodulePaths(directory)
+  
+  for (const subPath of submodulePaths) {
+    const fullPath = path.join(directory, subPath)
+    const gitFile = path.join(fullPath, '.git')
+    
+    // Read .git file to get gitdir path
+    const content = await fs.promises.readFile(gitFile, 'utf-8')
+    const match = content.match(/^gitdir:\s*(.+)$/m)
+    if (!match) continue
+    
+    const gitdir = path.resolve(fullPath, match[1].trim())
+    const headFile = path.join(gitdir, 'HEAD')
+    
+    // If HEAD doesn't exist, this is a broken stub
+    const headExists = await fs.promises.access(headFile)
+      .then(() => true)
+      .catch(() => false)
+    
+    if (!headExists) {
+      logger.log(`Removing broken submodule stub: ${subPath}`)
+      await fs.promises.rm(fullPath, { recursive: true, force: true })
+    }
+  }
+}
+```
+
+## Use Cases
+
+<AccordionGroup>
+  <Accordion title="Parallel feature development">
+    Multiple team members working on different features simultaneously.
+    
+    Each session has its own worktree, avoiding conflicts.
+  </Accordion>
+  
+  <Accordion title="Experimental refactoring">
+    Try risky refactors without affecting the main branch.
+    
+    Merge if successful, delete if not.
+  </Accordion>
+  
+  <Accordion title="Bug reproduction">
+    Isolate debugging in a clean worktree while keeping main branch stable.
+  </Accordion>
+  
+  <Accordion title="Code review sessions">
+    Check out a PR branch in a worktree for AI-assisted review.
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+- **Don't overuse worktrees** - Most tasks work fine in normal threads
+- **Name worktrees descriptively** - `fix-auth-timeout` not `worktree1`
+- **Merge or delete** - Clean up finished worktrees to avoid clutter
+- **Commit frequently** - Helps with merge conflict resolution
+
+## Related Features
+
+- [Text Messages](/features/text-messages) - Normal non-isolated sessions
+- [Scheduled Tasks](/features/scheduled-tasks) - Schedule worktree sessions
+- [Memory](/features/memory) - Share context across worktrees

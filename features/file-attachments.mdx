@@ -1,0 +1,274 @@
+---
+title: File Attachments
+description: Attach images, PDFs, code files, and other documents to your Discord messages for AI analysis
+---
+
+# File Attachments
+
+Kimaki processes file attachments in Discord messages, making them available to the AI for analysis, reference, and understanding.
+
+## Supported File Types
+
+Kimaki handles three categories of attachments:
+
+### Text Files
+
+Text-based files are read and included directly in the prompt:
+
+- `text/*` (`.txt`, `.md`, `.log`, etc.)
+- `application/json`
+- `application/xml`
+- `application/javascript` / `application/typescript`
+- `application/x-yaml`
+- `application/toml`
+
+**Format in prompt:**
+
+```xml
+<attachment filename="config.json" mime="application/json">
+{
+  "key": "value"
+}
+</attachment>
+```
+
+### Images
+
+Image files are processed and sent as base64 data URLs:
+
+- `image/png`
+- `image/jpeg`
+- `image/gif`
+- `image/webp`
+
+Images are automatically:
+
+- **Resized** if larger than 2048x2048 pixels
+- **Converted to JPEG** for efficient transmission
+- **Compressed** to reduce token usage
+
+From `discord/src/image-utils.ts`:
+
+```typescript
+const MAX_DIMENSION = 2048
+
+// Resize if needed
+if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+  const scale = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height)
+  sharp.resize(Math.round(width * scale), Math.round(height * scale))
+}
+```
+
+### PDFs
+
+PDF files are processed similarly to images:
+
+- `application/pdf`
+
+Converted to base64 data URLs and included in the message parts.
+
+## How It Works
+
+<Steps>
+  <Step title="Attach files to message">
+    Click the **+** icon in Discord and select files to attach.
+    
+    You can attach multiple files to a single message.
+  </Step>
+  
+  <Step title="Kimaki downloads attachments">
+    Files are fetched from Discord's CDN.
+    
+    From `message-formatting.ts:234-273`:
+    
+    ```typescript
+    const results = await Promise.all(
+      fileAttachments.map(async (attachment) => {
+        const response = await fetch(attachment.url)
+        const rawBuffer = Buffer.from(await response.arrayBuffer())
+        
+        // Process image (resize if needed, convert to JPEG)
+        const { buffer, mime } = await processImage(rawBuffer, originalMime)
+        
+        const base64 = buffer.toString('base64')
+        const dataUrl = `data:${mime};base64,${base64}`
+        
+        return {
+          type: 'file' as const,
+          mime,
+          filename: attachment.name,
+          url: dataUrl,
+          sourceUrl: attachment.url,
+        }
+      }),
+    )
+    ```
+  </Step>
+  
+  <Step title="Files added to message parts">
+    Text attachments are included as XML blocks.
+    
+    Images/PDFs are added as file parts with base64 data URLs.
+  </Step>
+  
+  <Step title="OpenCode receives files">
+    The AI can analyze images, read text files, and reference content.
+  </Step>
+</Steps>
+
+## Text Attachment Format
+
+Text files are wrapped in XML tags for clarity:
+
+```xml
+<attachment filename="error.log" mime="text/plain">
+Error: Connection timeout after 30000ms
+  at Database.connect (db.ts:142)
+  at async Server.start (index.ts:89)
+</attachment>
+```
+
+If a file fails to download:
+
+```xml
+<attachment filename="config.json" error="Failed to fetch: 404" />
+```
+
+## Image Processing
+
+Images go through a processing pipeline to optimize size and format:
+
+<CodeGroup>
+
+```typescript image-utils.ts
+import sharp from 'sharp'
+
+const MAX_DIMENSION = 2048
+const JPEG_QUALITY = 90
+
+export async function processImage(
+  buffer: Buffer,
+  originalMime: string,
+): Promise<{ buffer: Buffer; mime: string }> {
+  let processor = sharp(buffer)
+  const metadata = await processor.metadata()
+  
+  const width = metadata.width || 0
+  const height = metadata.height || 0
+  
+  // Resize if too large
+  if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+    const scale = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height)
+    processor = processor.resize(
+      Math.round(width * scale),
+      Math.round(height * scale),
+    )
+  }
+  
+  // Convert to JPEG unless it's already JPEG
+  const outputMime = originalMime === 'image/jpeg' ? 'image/jpeg' : 'image/jpeg'
+  processor = processor.jpeg({ quality: JPEG_QUALITY })
+  
+  return {
+    buffer: await processor.toBuffer(),
+    mime: outputMime,
+  }
+}
+```
+
+</CodeGroup>
+
+## Use Cases
+
+<AccordionGroup>
+  <Accordion title="Screenshot debugging">
+    Attach screenshots of errors, UI bugs, or unexpected behavior.
+    
+    The AI can analyze the image and suggest fixes based on what it sees.
+  </Accordion>
+  
+  <Accordion title="Code review from images">
+    Take a photo of code on a screen or whiteboard.
+    
+    The AI can read the code and provide feedback.
+  </Accordion>
+  
+  <Accordion title="Log file analysis">
+    Attach `.log` files from your application.
+    
+    The AI can parse errors, identify patterns, and suggest solutions.
+  </Accordion>
+  
+  <Accordion title="Configuration examples">
+    Share `config.json`, `.env.example`, or YAML files.
+    
+    The AI can validate syntax and suggest improvements.
+  </Accordion>
+  
+  <Accordion title="Design mockups">
+    Attach UI mockups or wireframes.
+    
+    Ask the AI to implement the design or critique the layout.
+  </Accordion>
+</AccordionGroup>
+
+## Uploading from CLI
+
+You can upload files to a thread programmatically:
+
+```bash
+# Upload to current session
+kimaki upload-to-discord --session <session-id> screenshot.png error.log
+
+# Upload multiple files
+kimaki upload-to-discord --session <session-id> *.png logs/*.log
+```
+
+Files appear as regular Discord attachments in the thread.
+
+## Requesting Files from Users
+
+The AI can request files using the `kimaki_file_upload` tool:
+
+```typescript
+// Tool call triggers Discord file picker
+{
+  tool: 'kimaki_file_upload',
+  input: {
+    prompt: 'Upload the database migration script'
+  }
+}
+```
+
+A button appears in Discord with a native file picker dialog. Selected files are downloaded to the project's `uploads/` directory.
+
+<Note>
+  The file upload tool is only available when OpenCode is running via Kimaki, not in standalone OpenCode sessions.
+</Note>
+
+## Limitations
+
+<Warning>
+  **File size limits** are enforced by Discord:
+  
+  - Free users: 25 MB per file
+  - Nitro users: 500 MB per file
+  
+  Large files may fail to download or timeout during processing.
+</Warning>
+
+## Security
+
+Attachments are:
+
+- Downloaded from Discord CDN over HTTPS
+- Processed in-memory (not saved to disk by default)
+- Included in OpenCode sessions with standard permission checks
+
+File upload tool saves to `uploads/` which is outside the project directory by default, triggering permission prompts.
+
+## Related Features
+
+- [Text Messages](/features/text-messages) - Send prompts without files
+- [Voice Messages](/features/voice-messages) - Audio transcription
+- [Memory](/features/memory) - Persistent project context

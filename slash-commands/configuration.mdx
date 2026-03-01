@@ -1,0 +1,392 @@
+---
+title: Configuration Commands
+description: Configure AI models, agents, verbosity, and mention mode for your Kimaki sessions
+---
+
+Configuration commands let you customize how Kimaki behaves in channels and sessions.
+
+## /model
+
+Change the AI model used for sessions in a channel or thread.
+
+### Parameters
+
+None - shows an interactive menu.
+
+### Usage
+
+```
+/model
+```
+
+### Model Selection Flow
+
+<Steps>
+
+### Select Provider
+
+Kimaki shows available providers with credentials:
+
+```
+Anthropic (8 models available)
+OpenAI (12 models available)
+Google (6 models available)
+```
+
+Providers without credentials are hidden. Use `/login` to add credentials.
+
+### Select Model
+
+After choosing a provider, select a model:
+
+```
+Anthropic
+├─ claude-sonnet-4-20250514 (2025-05-14)
+├─ claude-opus-4-20250514 (2025-05-14)
+└─ claude-sonnet-3.5-20241022 (2024-10-22)
+```
+
+### Select Thinking Level (if available)
+
+For models with thinking variants:
+
+```
+None (default)
+low
+medium
+high
+```
+
+Thinking levels control extended reasoning time.
+
+### Select Scope
+
+Choose where to apply the model:
+
+- **This session only** (thread only) - Override for this session
+- **This channel only** - Override for all sessions in this channel
+- **Global default** - Set as default for all channels
+
+</Steps>
+
+### Model Priority
+
+Kimaki resolves the model using this priority:
+
+1. **Session override** - Set with `/model` in a thread (scope: session)
+2. **Agent model** - Configured in the agent's `.md` file
+3. **Channel override** - Set with `/model` in a channel (scope: channel)
+4. **Global default** - Set with `/model` (scope: global)
+5. **OpenCode config** - `model` field in `opencode.json`
+6. **OpenCode recent** - Last model used in the project
+7. **Provider default** - Provider's default model
+
+<Note>
+**Agent Models**: When you switch agents with `/agent`, the session model preference is cleared so the new agent's model takes effect.
+</Note>
+
+### Session Model Switching
+
+When you run `/model` in an active session:
+
+1. Kimaki saves the new model preference
+2. **Aborts the current request** (if one is in progress)
+3. **Retries with the new model** automatically
+4. Shows: "Retrying current request with new model..."
+
+This lets you switch models mid-response if the current one isn't performing well.
+
+### Current Model Display
+
+The `/model` menu shows where the current model comes from:
+
+```
+Current (this thread): anthropic/claude-sonnet-4-20250514
+→ Session override
+
+Current (agent "plan"): anthropic/claude-opus-4-20250514
+→ Agent configuration
+
+Current (channel override): openai/gpt-4o
+→ Channel preference
+
+Current (global default): google/gemini-2.5-pro
+→ Global default
+
+Current (opencode default): anthropic/claude-sonnet-4
+→ From opencode.json or recent use
+```
+
+## /agent
+
+Change the agent used for sessions in a channel or thread.
+
+### Parameters
+
+None - shows an interactive menu.
+
+### Usage
+
+```
+/agent
+```
+
+### Behavior
+
+Kimaki shows available agents from `.opencode/agent/*.md`:
+
+```
+plan (Plan and design before implementation)
+build (Implement features quickly)
+review (Review code and suggest improvements)
+```
+
+After selecting an agent:
+
+- **In a thread**: Sets agent for the current session
+- **In a channel**: Sets agent for all new sessions
+
+<Note>
+**Model Cleared**: When switching agents in a session, Kimaki clears the session model preference so the new agent's configured model takes effect.
+</Note>
+
+### Quick Agent Commands
+
+Kimaki also registers shortcut commands for each agent:
+
+```
+/plan-agent    → Switch to "plan" agent
+/build-agent   → Switch to "build" agent
+/review-agent  → Switch to "review" agent
+```
+
+These commands:
+- Switch instantly without a dropdown
+- Work in channels and threads
+- Show the previous agent: "Switched to **build** agent (was **plan**)"
+
+<Note>
+**Dynamic Registration**: Quick agent commands are registered on bot startup based on agents in your `.opencode/agent/` directory. Command names are sanitized (lowercase, hyphens only).
+</Note>
+
+## /verbosity
+
+Control how much detail Kimaki shows in session threads.
+
+### Parameters
+
+- `level` (required) - Output verbosity level
+
+### Verbosity Levels
+
+**`text-only`** (minimal)
+- Shows only text responses (⬥ diamond parts)
+- Hides all tool executions, status messages, and thinking
+- Best for: Final results without noise
+
+**`text-and-essential-tools`** (default)
+- Shows text responses and essential tools:
+  - File edits (`edit`, `write`)
+  - Custom MCP tools
+- Hides read, search, and navigation tools
+- Best for: Seeing what changed without clutter
+
+**`tools-and-text`** (verbose)
+- Shows all output including:
+  - All tool executions (`read`, `grep`, `bash`, etc.)
+  - Status messages
+  - Tool results
+- Best for: Debugging or understanding AI's reasoning
+
+### Usage
+
+```
+/verbosity level:text-only
+```
+
+### Behavior
+
+- **Per-channel setting**: Applies to all sessions in the channel
+- **Immediate effect**: Affects active sessions mid-stream
+- **Thread and channel**: Works in both text channels and threads
+
+<Note>
+**Applies Immediately**: Changing verbosity mid-session affects the current response. Future messages in that thread use the new level.
+</Note>
+
+### Example Output
+
+**`text-only`**:
+
+```
+I've added authentication to the API.
+```
+
+**`text-and-essential-tools`**:
+
+```
+I've added authentication to the API.
+
+src/auth.ts:15
++ export function verifyToken(token: string) {
++   return jwt.verify(token, SECRET);
++ }
+```
+
+**`tools-and-text`**:
+
+```
+I've added authentication to the API.
+
+› read src/auth.ts
+1: import jwt from 'jsonwebtoken';
+...
+
+› edit src/auth.ts:15
++ export function verifyToken(token: string) {
++   return jwt.verify(token, SECRET);
++ }
+
+› bash: npm test
+✓ auth.test.ts (2 tests)
+```
+
+## /mention-mode
+
+Toggle mention-only mode for a channel.
+
+### Parameters
+
+None - toggles the current state.
+
+### Usage
+
+```
+/mention-mode
+```
+
+### Behavior
+
+**When enabled**:
+- Kimaki only starts sessions when @mentioned
+- Messages without @mentions are ignored
+- Existing threads still work normally (no @mention needed)
+
+**When disabled** (default):
+- Kimaki responds to all messages in the channel
+- Standard behavior
+
+### Example
+
+```
+Channel: #kimaki-dev
+Mention mode: enabled
+
+"Add auth" → Ignored
+
+"@Kimaki add auth" → Starts session
+```
+
+<Note>
+**Thread Behavior**: Messages in existing session threads always work, regardless of mention mode. Mention mode only affects new sessions in the channel.
+</Note>
+
+### Use Cases
+
+<Accordion title="Shared channels">
+  Use mention mode in channels where multiple bots or users are active:
+  
+  ```
+  Channel: #general
+  Message: "@Kimaki fix the build"
+  Message: "@OtherBot deploy to staging"
+  ```
+  
+  Prevents accidental triggers.
+</Accordion>
+
+<Accordion title="Selective usage">
+  Enable mention mode to control when Kimaki responds:
+  
+  ```
+  Channel: #brainstorm
+  
+  "Let's add a search feature" → Not for Kimaki, ignored
+  "@Kimaki implement search with Algolia" → Starts session
+  ```
+</Accordion>
+
+## Configuration Persistence
+
+All configuration is stored in SQLite:
+
+### Channel Preferences
+
+```sql
+-- Model
+CREATE TABLE channel_models (
+  channel_id TEXT PRIMARY KEY,
+  model_id TEXT NOT NULL,      -- "anthropic/claude-sonnet-4"
+  variant TEXT                   -- "high" or NULL
+)
+
+-- Agent
+CREATE TABLE channel_agents (
+  channel_id TEXT PRIMARY KEY,
+  agent_name TEXT NOT NULL
+)
+
+-- Verbosity
+CREATE TABLE channel_verbosity (
+  channel_id TEXT PRIMARY KEY,
+  verbosity_level TEXT NOT NULL  -- "text-only" | "text-and-essential-tools" | "tools-and-text"
+)
+
+-- Mention mode
+CREATE TABLE channel_mention_mode (
+  channel_id TEXT PRIMARY KEY,
+  mention_mode INTEGER NOT NULL  -- 0 or 1
+)
+```
+
+### Session Preferences
+
+```sql
+-- Session model (snapshotted at session start)
+CREATE TABLE session_models (
+  session_id TEXT PRIMARY KEY,
+  model_id TEXT NOT NULL,
+  variant TEXT
+)
+
+-- Session agent
+CREATE TABLE session_agents (
+  session_id TEXT PRIMARY KEY,
+  agent_name TEXT NOT NULL
+)
+```
+
+### Global Preferences
+
+```sql
+-- Global model default
+CREATE TABLE global_models (
+  app_id TEXT PRIMARY KEY,       -- Discord bot app ID
+  model_id TEXT NOT NULL,
+  variant TEXT
+)
+```
+
+## Best Practices
+
+<Note>
+**Snapshot Preferences**: Kimaki snapshots model and agent preferences when a session starts. This ensures sessions remain consistent even if you change channel defaults later.
+</Note>
+
+<Note>
+**Agent Files**: Define agents in `.opencode/agent/*.md` files. See [Model & Agent Configuration](/configuration/model-agent) for details.
+</Note>
+
+<Warning>
+**Model Credentials**: You must have valid API credentials for a provider before you can use its models. Run `/login` to add credentials.
+</Warning>

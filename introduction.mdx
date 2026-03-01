@@ -1,0 +1,66 @@
+---
+title: Kimaki
+description: Control OpenCode AI coding sessions from Discord. Send a message in a Discord channel and an AI agent edits code on your machine.
+---
+
+Kimaki is a Discord bot that lets you control [OpenCode](https://opencode.ai) coding sessions from Discord. Send a message in a Discord channel → an AI agent edits code on your machine.
+
+Think of it as texting your codebase. You describe what you want, the AI does it.
+
+## How it works
+
+Kimaki connects Discord to OpenCode, a coding agent similar to Claude Code. Each Discord channel is linked to a project directory on your machine. When you send a message in that channel, Kimaki starts an OpenCode session that can:
+
+- Read and edit files
+- Run terminal commands
+- Search your codebase
+- Use any tools you've configured
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running in 2 minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed setup guide with all configuration options
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/concepts/architecture">
+    Understand how Kimaki works under the hood
+  </Card>
+  <Card title="CLI commands" icon="terminal" href="/cli/overview">
+    Complete CLI command reference
+  </Card>
+</CardGroup>
+
+## Key features
+
+### Text and voice messages
+
+Send any message in a channel linked to a project. Kimaki creates a thread and starts an OpenCode session. You can even record voice messages - Kimaki transcribes them using Google's Gemini API with your project's file tree for accuracy.
+
+### File attachments
+
+Attach images, code files, or any other files to your message. Kimaki includes them in the session context. For long prompts, use Discord's "Send message as file" feature to bypass character limits.
+
+### Session management
+
+- **Resume sessions** - Continue where you left off
+- **Fork sessions** - Branch from any message in the conversation
+- **Share sessions** - Generate public URLs to share your session
+
+### One bot per machine
+
+**Each Discord bot you create is tied to one machine.** This is by design.
+
+When you run `kimaki` on a computer, it spawns OpenCode servers for projects on that machine. The bot can only access directories on the machine where it's running.
+
+To control multiple machines:
+
+1. Create a separate Discord bot for each machine
+2. Run `kimaki` on each machine with its own bot token
+3. Add all bots to the same Discord server
+
+Each channel shows which bot (machine) it's connected to.
+
+## Getting started
+
+Ready to get started? Head to the [Quickstart](/quickstart) guide to set up Kimaki in under 2 minutes.

@@ -1,0 +1,208 @@
+---
+title: Voice Messages
+description: Record voice messages in Discord and have them transcribed with context-aware AI powered by Gemini or OpenAI
+---
+
+# Voice Messages
+
+Kimaki can transcribe Discord voice messages using AI-powered transcription that understands your project context for accurate file names and technical terms.
+
+## Overview
+
+When you record a voice message in a Kimaki-linked channel:
+
+1. **Upload completes** - Discord processes the audio
+2. **Kimaki detects** the voice attachment
+3. **Transcription starts** using Gemini or OpenAI
+4. **Project context** is included for accuracy
+5. **Text appears** in the thread
+6. **Session starts** (unless it's a `/queue` message)
+
+## Setup
+
+Voice transcription requires an API key from either OpenAI or Google.
+
+<Steps>
+  <Step title="Choose a provider">
+    - **OpenAI** (recommended): Uses Whisper for high-quality transcription
+    - **Gemini**: Google's transcription with multimodal understanding
+  </Step>
+  
+  <Step title="Set your API key">
+    Run `/login` in a Kimaki channel, or set environment variables:
+    
+    ```bash
+    # OpenAI (recommended)
+    export OPENAI_API_KEY="sk-..."
+    
+    # Gemini
+    export GEMINI_API_KEY="..."
+    ```
+  </Step>
+  
+  <Step title="Record and send">
+    Hold the microphone icon in Discord to record, release to send.
+    
+    Kimaki transcribes automatically.
+  </Step>
+</Steps>
+
+<Note>
+  OpenAI is the preferred provider. Set it first if both keys are available.
+</Note>
+
+## Context-Aware Transcription
+
+Kimaki enhances transcription accuracy by including your project's file tree:
+
+```bash
+# File tree is generated with:
+git ls-files | tree --fromfile -a
+```
+
+This helps the AI correctly transcribe:
+
+- File names ("auth utils dot TS" → `auth-utils.ts`)
+- Function names from your codebase
+- Project-specific terminology
+- Path references
+
+### Example
+
+**Without context:**
+> "Open the off file and fix the error in line 42"
+
+**With project context:**
+> "Open the `auth.ts` file and fix the error in line 42"
+
+## Session Context
+
+For even better transcription, Kimaki also sends:
+
+- **Current session context** (last message in the thread)
+- **Last session context** (previous session's final state)
+
+This helps the AI understand what you're referring to when you say "that file" or "the function we just edited".
+
+## Implementation Details
+
+From `discord/src/voice-handler.ts:564-572`:
+
+```typescript
+const transcription = await transcribeAudio({
+  audio: audioBuffer,
+  prompt: transcriptionPrompt, // includes file tree
+  apiKey: transcriptionApiKey,
+  provider: transcriptionProvider, // 'openai' or 'gemini'
+  mediaType: audioAttachment.contentType,
+  currentSessionContext,
+  lastSessionContext,
+})
+```
+
+## Queue Messages
+
+Voice messages work with the `/queue` command:
+
+```
+/queue [voice message]
+```
+
+Kimaki transcribes the audio and queues it to send when the current response finishes.
+
+## Permissions
+
+The same permission rules apply to voice messages:
+
+- Server Owner
+- Administrator
+- Manage Server
+- "Kimaki" role
+
+Messages from unauthorized users are ignored.
+
+## Thread Naming
+
+When a voice message starts a new thread, the transcribed text becomes the thread name (truncated to 80 characters).
+
+From `discord/src/voice-handler.ts:595-617`:
+
+```typescript
+if (isNewThread) {
+  const threadName = text.replace(/\s+/g, ' ').trim().slice(0, 80)
+  if (threadName) {
+    await thread.setName(threadName)
+  }
+}
+```
+
+## Audio Processing Pipeline
+
+For real-time voice chat (when bot joins voice channels):
+
+<Steps>
+  <Step title="Audio capture">
+    Discord Opus stream → Opus decoder
+  </Step>
+  
+  <Step title="Resampling">
+    48kHz stereo → 16kHz mono PCM
+    
+    From `voice-handler.ts:63-87`:
+    
+    ```typescript
+    export function convertToMono16k(buffer: Buffer): Buffer {
+      const inputSampleRate = 48000
+      const outputSampleRate = 16000
+      const ratio = inputSampleRate / outputSampleRate
+      // ... downsampling logic
+    }
+    ```
+  </Step>
+  
+  <Step title="Streaming to Gemini">
+    100ms audio frames → Gemini Multimodal Live API
+    
+    Real-time bidirectional audio streaming for voice assistant interaction.
+  </Step>
+</Steps>
+
+<Warning>
+  Voice channel features (real-time voice chat with the AI) require a Gemini API key and use the Multimodal Live API.
+</Warning>
+
+## Error Handling
+
+If transcription fails:
+
+- **No API key**: Button appears to set one via `/login`
+- **Network error**: Error message with details
+- **Empty transcription**: "No speech detected" message
+- **Invalid format**: Unsupported audio format error
+
+## Supported Formats
+
+Discord voice messages are sent as:
+
+- **OGG Opus** (most common)
+- **Webm Opus**
+
+Both OpenAI Whisper and Gemini handle these formats natively.
+
+## Privacy
+
+Voice messages are:
+
+- Sent to OpenAI or Google APIs for transcription
+- Not stored by Kimaki beyond the session
+- Processed with the same privacy as text messages
+
+<Note>
+  If you're concerned about audio privacy, use text messages or file attachments instead.
+</Note>
+
+## Related Features
+
+- [Text Messages](/features/text-messages) - Standard text interaction
+- [File Attachments](/features/file-attachments) - Attach files to prompts
+- [Scheduled Tasks](/features/scheduled-tasks) - Schedule voice reminders

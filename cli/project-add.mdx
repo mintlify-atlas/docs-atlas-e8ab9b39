@@ -1,0 +1,164 @@
+---
+title: kimaki project add
+description: Create Discord channels for project directories without starting a session
+---
+
+The `project add` command creates Discord text and voice channels for a project directory, enabling you to trigger OpenCode sessions in that project from Discord.
+
+## Usage
+
+```bash
+kimaki project add [directory]
+```
+
+## Adding the current directory
+
+```bash
+cd /path/to/my-project
+kimaki project add
+```
+
+Creates channels for the current working directory.
+
+## Adding a specific directory
+
+```bash
+kimaki project add /path/to/another-project
+```
+
+## Command options
+
+<ParamField path="directory" type="string">
+  Project directory path. Defaults to the current working directory if not specified.
+</ParamField>
+
+<ParamField path="--guild" type="string">
+  Discord server (guild) ID where channels should be created. Auto-detects if the bot is in only one server.
+  
+  Get this by right-clicking the server icon → **Copy Server ID**.
+</ParamField>
+
+<ParamField path="--app-id" type="string">
+  Bot application ID for validation. Reads from database if available, otherwise auto-derived from token.
+</ParamField>
+
+## Environment variables
+
+<ParamField path="KIMAKI_BOT_TOKEN" type="string">
+  Discord bot token. Required in CI when credentials aren't in the database.
+</ParamField>
+
+## What gets created
+
+When you run `project add`, Kimaki creates:
+
+1. **Category**: A "Kimaki" category in your Discord server (if it doesn't exist)
+2. **Text channel**: Named after your project directory (e.g., `my-project`)
+3. **Voice channel**: Named with a microphone prefix (e.g., `🎤 my-project`)
+
+The text channel is where you send messages to trigger sessions. The voice channel supports voice message transcription.
+
+## Channel metadata
+
+Kimaki stores the channel-to-directory mapping in its SQLite database (`~/.kimaki/discord-sessions.db`). This mapping persists across bot restarts.
+
+## Examples
+
+### Add current directory
+
+```bash
+kimaki project add
+```
+
+### Add with explicit guild
+
+```bash
+kimaki project add . --guild 123456789012345678
+```
+
+### CI automation
+
+Add a project from a GitHub Actions workflow:
+
+```yaml .github/workflows/setup-kimaki.yml
+name: Setup Kimaki Channel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Create Discord channels
+        env:
+          KIMAKI_BOT_TOKEN: ${{ secrets.KIMAKI_BOT_TOKEN }}
+        run: |
+          npx -y kimaki project add \
+            --guild ${{ secrets.DISCORD_GUILD_ID }} \
+            --app-id ${{ secrets.DISCORD_APP_ID }}
+```
+
+### Add multiple projects
+
+```bash
+for dir in ~/projects/*; do
+  kimaki project add "$dir"
+done
+```
+
+## Behavior
+
+1. **Guild detection**: If `--guild` is not provided, Kimaki queries Discord to list servers the bot is in
+2. **Auto-select**: If the bot is in exactly one server, that server is used automatically
+3. **Category creation**: Creates a "Kimaki" category if it doesn't exist
+4. **Channel creation**: Creates text and voice channels in the category
+5. **Database storage**: Stores the channel→directory mapping in SQLite
+
+<Note>
+  The bot must be installed in at least one Discord server before running `project add`. Run `kimaki` interactively first to set up the bot.
+</Note>
+
+## Multiple servers
+
+You can add the same project to channels in multiple Discord servers:
+
+```bash
+# Add to server 1
+kimaki project add ~/my-project --guild 111111111111111111
+
+# Add to server 2
+kimaki project add ~/my-project --guild 222222222222222222
+```
+
+Both channels will point to the same directory on your machine.
+
+## Removing channels
+
+To remove project channels, use the `/remove-project` slash command in Discord, or manually delete the channels and remove the database entries.
+
+## Troubleshooting
+
+<Accordion title="Error: No bot token found">
+  Run `kimaki` once interactively to configure bot credentials, or set the `KIMAKI_BOT_TOKEN` environment variable.
+</Accordion>
+
+<Accordion title="Error: Bot not in any guilds">
+  Install the bot to a Discord server first. Run `kimaki` and follow the setup wizard to generate an install URL.
+</Accordion>
+
+<Accordion title="Multiple guilds found, --guild required">
+  When the bot is in multiple servers, you must specify which one with `--guild <server-id>`.
+</Accordion>
+
+<Accordion title="Channels created but can't send messages">
+  Check that the bot has **Send Messages** and **Create Public Threads** permissions in the server.
+</Accordion>
+
+## Related
+
+- [Discord setup](/configuration/discord-setup)
+- [Multiple instances](/configuration/multiple-instances)
+- [Channels and threads](/concepts/channels-and-threads)

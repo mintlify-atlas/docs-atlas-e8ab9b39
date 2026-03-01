@@ -1,0 +1,365 @@
+---
+title: Model & Agent Configuration
+description: Select and configure AI models and agents for your Kimaki sessions
+---
+
+Kimaki supports multiple AI models and agents. You can set defaults in your project configuration, then override per channel or session using Discord commands.
+
+## Model Configuration
+
+### Default Model (opencode.json)
+
+Set the default model in your project's `opencode.json`:
+
+```json
+{
+  "model": "anthropic/claude-sonnet-4-20250514"
+}
+```
+
+**Format:** `provider/model-name`
+
+### Available Models
+
+Kimaki supports models from multiple providers:
+
+**Anthropic:**
+
+- `anthropic/claude-sonnet-4-20250514` - Claude Sonnet 4 (balanced, fast)
+- `anthropic/claude-opus-4-20250514` - Claude Opus 4 (most capable, slower)
+- `anthropic/claude-3-5-sonnet-20241022` - Claude 3.5 Sonnet (legacy)
+
+**OpenAI:**
+
+- `openai/gpt-4o` - GPT-4o (vision, function calling)
+- `openai/gpt-4-turbo` - GPT-4 Turbo
+- `openai/o1` - OpenAI o1 (reasoning model)
+
+**Google:**
+
+- `google/gemini-2.5-pro` - Gemini 2.5 Pro
+- `google/gemini-2.0-flash-exp` - Gemini 2.0 Flash (experimental)
+
+**Other Providers:**
+
+- Kimaki supports any provider configured in OpenCode
+- Use `/login` to connect additional providers
+
+### Model Selection Priority
+
+Kimaki resolves models in this order (highest to lowest priority):
+
+1. **Session override** - Set with `/model` in a thread
+2. **Agent model** - Model specified in agent configuration
+3. **Channel override** - Set with `/model` in a text channel
+4. **Global default** - Set with `/model` (global scope)
+5. **OpenCode config** - `model` field in `opencode.json`
+6. **OpenCode recent** - Last model used in OpenCode CLI
+7. **Provider default** - Default model for the connected provider
+
+## Agent Configuration
+
+Agents are pre-configured AI personas with specific models, prompts, and behaviors.
+
+### Create an Agent
+
+Create agent files in `.opencode/agent/` directory:
+
+```bash
+mkdir -p .opencode/agent
+```
+
+**Example: `build.md`**
+
+```markdown
+---
+model: anthropic/claude-sonnet-4-20250514
+mode: primary
+---
+
+You are a build automation expert. Focus on:
+
+- Writing and optimizing build scripts
+- Configuring CI/CD pipelines
+- Dependency management
+- Build performance optimization
+
+Be concise and pragmatic. Prioritize reliability over cleverness.
+```
+
+**Example: `plan.md`**
+
+```markdown
+---
+model: openai/o1
+mode: primary
+---
+
+You are a software architect and planning expert. Your job is to:
+
+- Break down complex tasks into clear steps
+- Identify dependencies and potential issues
+- Propose implementation strategies
+- Create actionable TODO lists
+
+Do not write code unless asked. Focus on planning and design.
+```
+
+### Agent Frontmatter
+
+**Required:**
+
+- `model` - Model to use for this agent (e.g., `anthropic/claude-sonnet-4-20250514`)
+- `mode` - Agent mode (`primary` for main agents, `support` for specialized tasks)
+
+**Optional:**
+
+- `description` - Short description shown in `/agent` menu
+- `hidden` - Set to `true` to hide from `/agent` menu
+
+### Agent Modes
+
+**`primary`** - General-purpose agents shown in `/agent` command:
+
+- Use for common workflows (build, test, plan, debug)
+- Shown in agent selection menus
+- Automatically registered as quick commands (e.g., `/build-agent`)
+
+**`all`** - Agents available in all contexts:
+
+- Similar to `primary` but with broader scope
+- Shown in all agent menus
+
+**`support`** - Specialized agents:
+
+- Used for specific tasks or internal workflows
+- Hidden from main menus unless explicitly called
+
+## Discord Commands
+
+### `/model` - Select Model
+
+Open an interactive menu to choose a model:
+
+<Steps>
+  <Step title="Run Command">
+    Type `/model` in a channel or thread.
+  </Step>
+
+  <Step title="Select Provider">
+    Choose from connected providers (Anthropic, OpenAI, Google, etc.).
+  </Step>
+
+  <Step title="Select Model">
+    Choose a model from the provider's available models.
+  </Step>
+
+  <Step title="Select Scope">
+    Apply the model to:
+    - **This session only** - Override for current thread
+    - **This channel only** - Override for all sessions in this channel
+    - **Global default** - Set as default for all channels
+  </Step>
+</Steps>
+
+<Info>
+  Session-level overrides only appear when running `/model` inside a thread with an active session.
+</Info>
+
+### `/agent` - Select Agent
+
+Switch to a different agent:
+
+<Steps>
+  <Step title="Run Command">
+    Type `/agent` in a channel or thread.
+  </Step>
+
+  <Step title="Select Agent">
+    Choose from available agents (filtered to `primary` and `all` modes).
+  </Step>
+</Steps>
+
+When you switch agents:
+
+- The session model is cleared (agent's model takes effect)
+- The new agent's prompt and behavior apply to future messages
+- Previous messages remain unchanged
+
+### Quick Agent Commands
+
+Each agent automatically registers a quick command:
+
+- `/build-agent` - Switch to "build" agent
+- `/plan-agent` - Switch to "plan" agent
+- `/debug-agent` - Switch to "debug" agent
+
+Quick commands skip the selection menu for faster switching.
+
+### `/unset-model-override` - Remove Override
+
+Clear the model override for a channel:
+
+```
+/unset-model-override
+```
+
+This removes the channel or global model preference, falling back to the next priority level.
+
+## Model Variants (Thinking Levels)
+
+Some models support "thinking" or reasoning variants:
+
+- Claude: `high`, `medium`, `low`
+- OpenAI o1: Extended thinking time
+
+When selecting a model with `/model`, Kimaki prompts for a thinking level if available:
+
+```
+Select a thinking level:
+- None (default)
+- high
+- medium
+- low
+```
+
+Thinking variants trade speed for more thorough reasoning.
+
+## Connecting Providers
+
+### `/login` - Add Provider Credentials
+
+Connect to AI providers to use their models:
+
+<Steps>
+  <Step title="Run Command">
+    Type `/login` in any Kimaki channel.
+  </Step>
+
+  <Step title="Follow OAuth Flow">
+    For OAuth providers (Anthropic, OpenAI), click the link and authorize.
+  </Step>
+
+  <Step title="Enter API Key">
+    For API key providers, paste your API key when prompted.
+  </Step>
+</Steps>
+
+**Supported Providers:**
+
+- **Anthropic** - OAuth or API key
+- **OpenAI** - OAuth or API key
+- **Google** - API key (Gemini models)
+- **Other** - Any provider supported by OpenCode
+
+<Note>
+  Credentials are stored in OpenCode's secure credential store, not in Kimaki's database.
+</Note>
+
+## Best Practices
+
+**Use Agents for Workflows:**
+
+Create agents for common workflows:
+
+- `build` - Build, test, and CI tasks
+- `debug` - Debugging and troubleshooting
+- `plan` - Architecture and planning (use slower, more capable models)
+- `refactor` - Code cleanup and refactoring
+
+**Set Reasonable Defaults:**
+
+Use fast models by default (Sonnet, GPT-4o), reserve slow models (Opus, o1) for agents that need deep reasoning.
+
+**Session Overrides for Experimentation:**
+
+Use `/model` in threads to test different models without changing channel defaults.
+
+**Global Defaults for Consistency:**
+
+Set a global default model so new channels use a consistent model:
+
+```
+/model → select model → Global default
+```
+
+## Example Agent Library
+
+Create these agents in `.opencode/agent/` for a complete workflow:
+
+**`.opencode/agent/build.md`:**
+
+```markdown
+---
+model: anthropic/claude-sonnet-4-20250514
+mode: primary
+description: Build automation and CI/CD expert
+---
+
+Focus on build scripts, dependencies, and CI configuration.
+```
+
+**`.opencode/agent/plan.md`:**
+
+```markdown
+---
+model: openai/o1
+mode: primary
+description: Planning and architecture expert
+---
+
+Break down tasks, identify issues, propose strategies. No code unless asked.
+```
+
+**`.opencode/agent/debug.md`:**
+
+```markdown
+---
+model: anthropic/claude-opus-4-20250514
+mode: primary
+description: Debugging specialist
+---
+
+Analyze errors, trace execution, propose fixes. Be thorough.
+```
+
+**`.opencode/agent/fast.md`:**
+
+```markdown
+---
+model: google/gemini-2.0-flash-exp
+mode: primary
+description: Quick responses for simple tasks
+---
+
+Fast, concise answers. Skip explanations unless asked.
+```
+
+## Troubleshooting
+
+**Model not available:**
+
+Use `/login` to connect the provider. Only connected providers show models.
+
+**Agent not showing in menu:**
+
+Check agent mode in frontmatter. Only `primary` and `all` agents appear in `/agent` menu.
+
+**Model override not applying:**
+
+Restart the session or use `/restart-opencode-server` to reload configuration.
+
+**Quick agent command missing:**
+
+Agent commands are registered at bot startup. Restart Kimaki after creating new agents.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="OpenCode Config" icon="gear" href="/configuration/opencode-config">
+    Configure permissions and behavior
+  </Card>
+  <Card title="Best Practices" icon="star" href="/guides/best-practices">
+    Learn workflow optimization tips
+  </Card>
+</CardGroup>

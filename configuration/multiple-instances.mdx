@@ -1,0 +1,242 @@
+---
+title: Multiple Bot Instances
+description: Run multiple Kimaki instances on the same machine with isolated configurations
+---
+
+Kimaki supports running multiple bot instances on a single machine, each with its own database, project directory, and Discord bot. This is useful for separating work environments, teams, or testing.
+
+## Architecture
+
+Each Kimaki instance has:
+
+- **Separate Discord bot** - Different bot token and Application ID
+- **Isolated database** - Independent `discord-sessions.db` file
+- **Dedicated projects directory** - Where `/create-new-project` creates folders
+- **Unique lock port** - Prevents conflicts between instances
+
+## Default Instance
+
+The default instance uses:
+
+- **Data directory:** `~/.kimaki`
+- **Database:** `~/.kimaki/discord-sessions.db`
+- **Projects:** `~/.kimaki/projects`
+- **Lock port:** `29988` (or derived from data dir hash)
+
+```bash
+npx kimaki
+```
+
+## Additional Instances
+
+Run additional instances with `--data-dir` and `KIMAKI_LOCK_PORT`:
+
+<Steps>
+  <Step title="Create Second Discord Bot">
+    Follow the [Discord Setup](/configuration/discord-setup) guide to create another Discord application and bot.
+
+    <Info>
+      Each instance needs its own Discord bot. You cannot share bot tokens between instances.
+    </Info>
+  </Step>
+
+  <Step title="Choose Data Directory">
+    Pick a unique directory for the instance:
+
+    ```bash
+    # Work projects
+    ~/work-kimaki
+
+    # Personal projects
+    ~/personal-kimaki
+
+    # Team-specific
+    ~/team-alpha-kimaki
+    ```
+  </Step>
+
+  <Step title="Set Lock Port">
+    Choose a unique TCP port (recommended range: 30000-39999):
+
+    ```bash
+    export KIMAKI_LOCK_PORT=31001
+    ```
+
+    <Warning>
+      Each instance must use a different lock port. If two instances share a port, the second will shut down the first, killing active sessions.
+    </Warning>
+  </Step>
+
+  <Step title="Start Instance">
+    Run Kimaki with the custom data directory:
+
+    ```bash
+    KIMAKI_LOCK_PORT=31001 npx kimaki --data-dir ~/work-kimaki
+    ```
+
+    The CLI will guide you through bot setup using the new bot token.
+  </Step>
+</Steps>
+
+## Example: Three Instances
+
+```bash
+# Instance 1: Default (personal projects)
+npx kimaki
+
+# Instance 2: Work projects
+KIMAKI_LOCK_PORT=31001 npx kimaki --data-dir ~/work-kimaki
+
+# Instance 3: Testing
+KIMAKI_LOCK_PORT=31002 npx kimaki --data-dir ~/test-kimaki
+```
+
+Each instance:
+
+- Runs independently
+- Can be in the same Discord server (different bots)
+- Accesses different project directories on your machine
+- Has isolated session history and preferences
+
+## Lock Port Behavior
+
+**Automatic Port Assignment:**
+
+If you don't set `KIMAKI_LOCK_PORT`, Kimaki derives a port from the data directory path:
+
+- Default `~/.kimaki` → Port `29988` (backwards compatible)
+- Custom dirs → Port in range `30000-39999` (hash-based)
+
+**Manual Port Assignment:**
+
+Set `KIMAKI_LOCK_PORT` to override the derived port:
+
+```bash
+KIMAKI_LOCK_PORT=31234 npx kimaki --data-dir ~/my-bot
+```
+
+<Note>
+  Use manual port assignment if the auto-derived port conflicts, or if you want predictable port numbers.
+</Note>
+
+## Process Management
+
+Run each instance in a separate terminal or use a process manager:
+
+**tmux (recommended):**
+
+```bash
+# Start first instance
+tmux new-session -s kimaki-default "npx kimaki"
+
+# Start second instance
+tmux new-session -s kimaki-work "KIMAKI_LOCK_PORT=31001 npx kimaki --data-dir ~/work-kimaki"
+
+# List sessions
+tmux list-sessions
+
+# Attach to a session
+tmux attach -t kimaki-default
+```
+
+**pm2:**
+
+```bash
+pm2 start "npx kimaki" --name kimaki-default
+pm2 start "KIMAKI_LOCK_PORT=31001 npx kimaki --data-dir ~/work-kimaki" --name kimaki-work
+
+pm2 list
+pm2 logs kimaki-default
+```
+
+**systemd (Linux):**
+
+Create service files in `/etc/systemd/system/`:
+
+```ini
+# /etc/systemd/system/kimaki-default.service
+[Unit]
+Description=Kimaki Default Bot
+After=network.target
+
+[Service]
+Type=simple
+User=youruser
+WorkingDirectory=/home/youruser
+ExecStart=/usr/bin/npx kimaki
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable kimaki-default
+sudo systemctl start kimaki-default
+sudo systemctl status kimaki-default
+```
+
+## Switching Between Instances
+
+To switch a project from one instance to another:
+
+<Steps>
+  <Step title="Stop Old Instance">
+    Stop the Kimaki instance that currently manages the project.
+  </Step>
+
+  <Step title="Add Project to New Instance">
+    Run the new instance and use `/add-project` or `npx kimaki project add` to create channels.
+  </Step>
+
+  <Step title="Archive Old Channels (Optional)">
+    Archive or delete the channels from the old instance to avoid confusion.
+  </Step>
+</Steps>
+
+## Use Cases
+
+**Team Separation:**
+
+Run separate bots for different teams, each with isolated projects and session history.
+
+**Work/Personal Split:**
+
+Keep work and personal projects completely separate with different bots and data directories.
+
+**Testing:**
+
+Run a test instance with a separate bot to experiment without affecting production channels.
+
+**Multiple Machines:**
+
+If you have multiple machines (desktop, laptop, server), create a bot for each. Install all bots in the same Discord server for centralized access.
+
+## Troubleshooting
+
+**Error: Lock port already in use**
+
+Another process is using the lock port. Either:
+
+- Set a different `KIMAKI_LOCK_PORT`
+- Stop the other Kimaki instance
+- Check for stale processes: `lsof -i :29988`
+
+**Bots conflict in same server**
+
+Each channel is tagged with an Application ID in its topic. Bots ignore channels belonging to other bots. If you see conflicts, check the channel topic for the `<app>` tag.
+
+**Database locked errors**
+
+Each data directory should only be used by one instance at a time. Don't run multiple instances with the same `--data-dir`.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Discord Setup" icon="discord" href="/configuration/discord-setup">
+    Create additional Discord bots
+  </Card>
+  <Card title="Best Practices" icon="star" href="/guides/best-practices">
+    Organize your Kimaki deployment
+  </Card>
+</CardGroup>

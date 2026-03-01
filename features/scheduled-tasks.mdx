@@ -1,0 +1,394 @@
+---
+title: Scheduled Tasks
+description: Schedule one-time or recurring tasks with cron expressions to automate coding workflows
+---
+
+# Scheduled Tasks
+
+Kimaki can schedule tasks to run at specific times or on recurring schedules using the `--send-at` flag with the `kimaki send` command.
+
+## Overview
+
+Scheduled tasks support:
+
+- **One-time execution** at a specific UTC date/time
+- **Recurring execution** via cron expressions (in local timezone)
+- **All send flags** (`--notify-only`, `--worktree`, `--agent`, `--model`, `--user`)
+- **Thread or channel** targeting
+
+## One-Time Tasks
+
+Schedule a task to run once at a specific time:
+
+```bash
+kimaki send --channel <channel-id> \
+  --prompt "Review open PRs and summarize status" \
+  --send-at "2026-03-15T09:00:00Z"
+```
+
+<Note>
+  Date/time must be in **UTC ISO format** ending with `Z`.
+</Note>
+
+### Date Format
+
+Valid formats:
+
+```bash
+# Full ISO timestamp
+--send-at "2026-03-15T09:00:00Z"
+
+# With milliseconds
+--send-at "2026-03-15T09:00:00.000Z"
+
+# Without seconds (assumes :00)
+--send-at "2026-03-15T09:00Z"
+```
+
+From `task-schedule.ts:45-92`:
+
+```typescript
+const UTC_SEND_AT_DATE_REGEX =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?Z$/
+
+function parseUtcSendAtDate({ value, now }: { value: string; now: Date }): Date | Error | null {
+  if (!UTC_SEND_AT_DATE_REGEX.test(value)) {
+    return new Error(
+      `--send-at date must be UTC ISO format ending with Z (example: 2026-03-01T09:00:00Z). Received: ${value}`,
+    )
+  }
+  
+  const runAt = new Date(value)
+  if (Number.isNaN(runAt.getTime())) {
+    return new Error(`Invalid UTC date for --send-at: ${value}`)
+  }
+  
+  if (runAt.getTime() <= now.getTime()) {
+    return new Error(`--send-at date must be in the future (UTC): ${value}`)
+  }
+  
+  return runAt
+}
+```
+
+## Recurring Tasks
+
+Schedule tasks to run repeatedly using cron expressions:
+
+```bash
+# Every Monday at 9am (local time)
+kimaki send --channel <channel-id> \
+  --prompt "Run weekly test suite and summarize failures" \
+  --send-at "0 9 * * 1"
+
+# Every day at 6am
+kimaki send --channel <channel-id> \
+  --prompt "Check for security updates in dependencies" \
+  --send-at "0 6 * * *"
+
+# First day of every month at 10am
+kimaki send --channel <channel-id> \
+  --prompt "Generate monthly usage report" \
+  --send-at "0 10 1 * *"
+```
+
+<Note>
+  Cron expressions run in your **local timezone** (detected via `Intl.DateTimeFormat().resolvedOptions().timeZone`).
+</Note>
+
+### Cron Format
+
+Standard 5-field cron syntax:
+
+```
+┌───────────── minute (0 - 59)
+│ ┌───────────── hour (0 - 23)
+│ │ ┌───────────── day of month (1 - 31)
+│ │ │ ┌───────────── month (1 - 12)
+│ │ │ │ ┌───────────── day of week (0 - 6) (Sunday = 0)
+│ │ │ │ │
+* * * * *
+```
+
+**Examples:**
+
+| Expression | Description |
+|------------|-------------|
+| `0 9 * * 1` | Every Monday at 9am |
+| `0 6 * * *` | Every day at 6am |
+| `0 10 1 * *` | First of month at 10am |
+| `*/15 * * * *` | Every 15 minutes |
+| `0 0 * * 0` | Every Sunday at midnight |
+
+From `task-schedule.ts:160-199`:
+
+```typescript
+import { CronExpressionParser } from 'cron-parser'
+
+export function getNextCronRun({
+  cronExpr,
+  timezone,
+  from,
+}: {
+  cronExpr: string
+  timezone: string
+  from: Date
+}): Date | Error {
+  const parsed = errore.try({
+    try: () => {
+      return CronExpressionParser.parse(cronExpr, {
+        currentDate: from,
+        tz: timezone,
+      })
+    },
+    catch: (error) => {
+      return new Error(`Invalid cron expression: ${cronExpr}`, { cause: error })
+    },
+  })
+  
+  if (parsed instanceof Error) {
+    return parsed
+  }
+  
+  const next = parsed.next().toDate()
+  return next
+}
+```
+
+## Managing Tasks
+
+### List All Tasks
+
+```bash
+kimaki task list
+```
+
+Output:
+
+```
+Scheduled Tasks:
+
+ID: 1
+  Kind: channel
+  Channel: 123456789
+  Prompt: Review open PRs
+  Schedule: at 2026-03-15T09:00:00Z
+  Next run: 2026-03-15 09:00:00 UTC
+
+ID: 2
+  Kind: channel
+  Channel: 123456789
+  Prompt: Weekly test suite
+  Schedule: cron "0 9 * * 1" (America/New_York)
+  Next run: 2026-03-08 09:00:00 EST
+```
+
+### Delete a Task
+
+```bash
+kimaki task delete <id>
+```
+
+Tasks are also visible in `kimaki session list` for sessions they created:
+
+```bash
+kimaki session list
+```
+
+Output includes schedule info:
+
+```
+sessionId="ses_abc123" started="2026-03-01T09:05:12Z" schedule="delay" taskId=1
+```
+
+## Task Payload Structure
+
+From `task-schedule.ts:6-27`:
+
+```typescript
+export type ScheduledTaskPayload =
+  | {
+      kind: 'thread'
+      threadId: string
+      prompt: string
+      agent: string | null
+      model: string | null
+      username: string | null
+      userId: string | null
+    }
+  | {
+      kind: 'channel'
+      channelId: string
+      prompt: string
+      name: string | null
+      notifyOnly: boolean
+      worktreeName: string | null
+      agent: string | null
+      model: string | null
+      username: string | null
+      userId: string | null
+    }
+```
+
+Tasks can target:
+
+- **Channels** (creates new threads)
+- **Existing threads** (sends follow-up messages)
+
+## Combining Flags
+
+All `kimaki send` flags work with `--send-at`:
+
+<CodeGroup>
+
+```bash Notify-Only
+# Create reminder thread without starting AI session
+kimaki send --channel <channel-id> \
+  --prompt "Reminder: API key expires tomorrow" \
+  --send-at "2026-06-30T09:00:00Z" \
+  --notify-only
+```
+
+```bash Worktree
+# Schedule isolated session in worktree
+kimaki send --channel <channel-id> \
+  --prompt "Investigate memory leak in production logs" \
+  --send-at "0 9 * * 1" \
+  --worktree investigate-leak
+```
+
+```bash Agent + Model
+# Use specific agent/model for scheduled task
+kimaki send --channel <channel-id> \
+  --prompt "Review all pending PRs and create summary" \
+  --send-at "0 10 * * 1" \
+  --agent review \
+  --model anthropic/claude-opus-4
+```
+
+```bash Thread Reminder
+# Remind user about existing thread
+kimaki send --thread <thread-id> \
+  --prompt "Reminder: @user check back on this" \
+  --send-at "2026-03-01T15:00:00Z" \
+  --notify-only
+```
+
+</CodeGroup>
+
+<Warning>
+  `--wait` is **incompatible** with `--send-at` because the task runs in the future.
+</Warning>
+
+## Use Cases
+
+<AccordionGroup>
+  <Accordion title="Proactive reminders">
+    When you create an API key expiring in 90 days, schedule a reminder:
+    
+    ```bash
+    kimaki send --channel <channel-id> \
+      --prompt "Reminder: <@userId> API key created 2026-03-01 expires 2026-06-01. Renew before production breaks." \
+      --send-at "2026-05-28T09:00:00Z" \
+      --notify-only
+    ```
+    
+    From `system-message.ts:355`:
+    
+    > Proactively schedule a `--notify-only` reminder before the expiration so the user gets notified in time.
+  </Accordion>
+  
+  <Accordion title="Weekly QA automation">
+    Run test suite every Monday and notify on failures:
+    
+    ```bash
+    kimaki send --channel <channel-id> \
+      --prompt "Run full test suite, inspect failures, post summary, and mention @user only when failures require review" \
+      --send-at "0 9 * * 1"
+    ```
+  </Accordion>
+  
+  <Accordion title="Recurring maintenance">
+    Monthly dependency updates:
+    
+    ```bash
+    kimaki send --channel <channel-id> \
+      --prompt "Check for dependency updates, create PR if safe updates available" \
+      --send-at "0 9 1 * *"
+    ```
+  </Accordion>
+  
+  <Accordion title="Thread reminders">
+    User says "remind me in 2 hours":
+    
+    ```bash
+    # Compute future UTC time
+    FUTURE_TIME=$(date -u -d '+2 hours' +%Y-%m-%dT%H:%M:%SZ)
+    
+    kimaki send --session <session-id> \
+      --prompt "Reminder: <@userId> you asked to be reminded about this thread." \
+      --send-at "$FUTURE_TIME" \
+      --notify-only
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+### Detailed Prompts
+
+<Note>
+  Scheduled tasks should have **long, detailed prompts** with goal, constraints, expected output format, and completion criteria.
+</Note>
+
+Bad:
+
+```bash
+--prompt "Check the API"
+```
+
+Good:
+
+```bash
+--prompt "Check API health endpoint at https://api.example.com/health. If status is not 200 or response time > 500ms, create an incident report in incidents/ with timestamp, status code, response time, and error details. Mention @oncall if critical."
+```
+
+### Notification Context
+
+<Warning>
+  Notification prompts must be **very detailed**. The user has no context from the original session.
+</Warning>
+
+Bad:
+
+```bash
+--prompt "Reminder: API key expiring"
+```
+
+Good:
+
+```bash
+--prompt "Reminder: <@userId> the OpenAI API key created on 2026-03-01 for the production chatbot expires on 2026-06-01. Renew at https://platform.openai.com/api-keys before it breaks production. Key name: prod-chatbot-key"
+```
+
+From `system-message.ts:336-343`:
+
+> Include: what was done, when it was done, why the reminder exists, what action is needed, and any relevant identifiers (key names, service names, file paths, URLs).
+
+### Memory Across Runs
+
+Recurring tasks can maintain state by reading/writing a file:
+
+```bash
+kimaki send --channel <channel-id> \
+  --prompt "Read docs/automation-notes.md for context. Run benchmark suite, append results to the file with timestamp. If performance regressed >10%, mention @team." \
+  --send-at "0 9 * * 1"
+```
+
+This creates persistent memory across scheduled runs.
+
+## Related Features
+
+- [Text Messages](/features/text-messages) - Manual session triggering
+- [Worktrees](/features/worktrees) - Isolated scheduled sessions
+- [Memory](/features/memory) - Persistent context for recurring tasks

@@ -1,0 +1,185 @@
+---
+title: Best Practices
+description: Best practices for using Kimaki effectively with your team and workflows
+---
+
+Follow these guidelines to get the most out of Kimaki and avoid common pitfalls.
+
+## Server Organization
+
+### Create a Dedicated Discord Server
+
+**Create a dedicated Discord server for your coding agents.** This keeps your coding sessions separate from other servers and gives you full control over permissions.
+
+**Add all your bots to that server.** One server, multiple machines. Each channel is clearly labeled with its project directory.
+
+<Tip>
+A dedicated server makes it easier to manage permissions, find sessions, and keep your workspace organized.
+</Tip>
+
+## Team Access Control
+
+### Use the "Kimaki" Role for Team Access
+
+Create a role named "Kimaki" (case-insensitive) and assign it to users who should be able to trigger sessions.
+
+Only users with these Discord permissions can interact with the bot:
+
+- **Server Owner** - Full access
+- **Administrator** - Full access
+- **Manage Server** - Full access
+- **"Kimaki" role** - Create a role with this name and assign to trusted users
+
+Messages from users without these permissions are ignored.
+
+### Block Access with "no-kimaki" Role
+
+Create a role named **"no-kimaki"** (case-insensitive) to block specific users from using the bot, even if they have other permissions like Server Owner or Administrator.
+
+This implements the "four-eyes principle" - it adds friction to prevent accidental usage. Even if you're a server owner, you must remove this role to interact with the bot.
+
+**Use cases:**
+
+<Accordion title="When to use no-kimaki role">
+- Prevent accidental bot triggers by owners who share servers
+- Temporarily disable access for specific users
+- Break-glass scenario: removing the role is a deliberate action
+</Accordion>
+
+## Multi-Machine Setup
+
+### One Bot Per Machine
+
+**Each Discord bot you create is tied to one machine.** This is by design.
+
+When you run `kimaki` on a computer, it spawns OpenCode servers for projects on that machine. The bot can only access directories on the machine where it's running.
+
+To control multiple machines:
+
+<Steps>
+  <Step title="Create separate bots">
+    Create a separate Discord bot for each machine
+  </Step>
+  <Step title="Run kimaki on each machine">
+    Run `kimaki` on each machine with its own bot token
+  </Step>
+  <Step title="Add all bots to the same server">
+    Add all bots to the same Discord server
+  </Step>
+</Steps>
+
+Each channel shows which bot (machine) it's connected to. You can have channels from different machines in the same server, controlled by different bots.
+
+### Running Multiple Instances on Same Machine
+
+By default, Kimaki stores its data in `~/.kimaki`. To run multiple bot instances on the same machine (e.g., for different teams or projects), use a separate `--data-dir` and optionally set `KIMAKI_LOCK_PORT` explicitly:
+
+<CodeGroup>
+```bash Instance 1
+npx -y kimaki@latest
+```
+
+```bash Instance 2
+KIMAKI_LOCK_PORT=31001 npx -y kimaki@latest --data-dir ~/work-bot
+```
+
+```bash Instance 3
+KIMAKI_LOCK_PORT=31002 npx -y kimaki@latest --data-dir ~/personal-bot
+```
+</CodeGroup>
+
+Each instance has its own:
+
+- **Database** - Bot credentials, channel mappings, session history
+- **Projects directory** - Where `/create-new-project` creates new folders
+- **Lock port** - Derived from the data directory path by default; override with `KIMAKI_LOCK_PORT` when you need a specific port
+
+## Working with Long Prompts
+
+### Send Long Prompts as File Attachments
+
+**Send long prompts as file attachments.** Discord has character limits for messages. Tap the plus icon and use "Send message as file" for longer prompts. Kimaki reads file attachments as your message.
+
+<Note>
+File attachments are also useful for sending code examples, error logs, or any context the AI needs to see.
+</Note>
+
+## Project Configuration
+
+### Configure Permissions in opencode.json
+
+By default, most tools run without asking. The main exception is `external_directory` - any tool that touches paths outside the project directory will prompt for approval.
+
+You can customize permissions in your project's `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "git *": "allow",
+      "npm *": "allow",
+      "rm *": "deny"
+    },
+    "external_directory": {
+      "~/other-project/**": "allow"
+    }
+  }
+}
+```
+
+Each permission resolves to `"allow"` (run automatically), `"ask"` (show buttons in Discord), or `"deny"` (block).
+
+<Warning>
+If you change `opencode.json` while the bot is running, you need to restart the OpenCode server for the new permissions to take effect. Use the `/restart-opencode-server` command in Discord or restart Kimaki.
+</Warning>
+
+### Set the AI Model
+
+Set the AI model in your project's `opencode.json`:
+
+```json
+{
+  "model": "anthropic/claude-sonnet-4-20250514"
+}
+```
+
+Format: `provider/model-name`
+
+**Examples:**
+
+- `anthropic/claude-sonnet-4-20250514` - Claude Sonnet 4
+- `anthropic/claude-opus-4-20250514` - Claude Opus 4
+- `openai/gpt-4o` - GPT-4o
+- `google/gemini-2.5-pro` - Gemini 2.5 Pro
+
+Or use these Discord commands to change settings per channel/session:
+
+- `/model` - Select a different AI model
+- `/agent` - Select a different agent (if you have multiple agents configured in your project)
+
+## Memory Management
+
+### Use MEMORY.md for Persistent Context
+
+Kimaki supports persistent memory across sessions via a `MEMORY.md` file in your project root. No flags needed — if the file exists, the AI reads it at session start.
+
+```markdown
+# MEMORY.md
+
+Using JWT tokens with 15min expiry. Refresh tokens in httpOnly cookies.
+User prefers kebab-case filenames and errore-style error handling.
+```
+
+The AI can update this file to store learnings, decisions, preferences, and context worth preserving. After long idle gaps (10+ min), the AI is reminded to save important context before starting new work.
+
+## Multi-Agent Orchestration
+
+### Allow Other Bots to Trigger Kimaki
+
+By default, messages from other bots are ignored. To allow another bot to trigger Kimaki sessions, assign it the **"Kimaki"** role. Kimaki creates this role automatically on startup, or you can create it manually. Bots without the role are silently ignored to prevent loops.
+
+<Tip>
+This is useful for building automation workflows where one bot orchestrates multiple coding agents.
+</Tip>

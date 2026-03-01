@@ -1,0 +1,397 @@
+---
+title: Troubleshooting
+description: Common issues and solutions when using Kimaki
+---
+
+This guide covers common issues you might encounter when using Kimaki and how to resolve them.
+
+## Bot Not Responding
+
+### Check Permissions
+
+Only users with specific Discord permissions can interact with the bot:
+
+- Server Owner
+- Administrator
+- Manage Server
+- "Kimaki" role (case-insensitive)
+
+<Accordion title="How to verify your permissions">
+1. Check if you have one of the required Discord permissions
+2. Look for a "Kimaki" role in your server's role list
+3. Verify you don't have the "no-kimaki" role assigned
+</Accordion>
+
+### Check if Bot is Running
+
+The Kimaki CLI must be running on your machine for the bot to respond:
+
+```bash
+# Check if kimaki is running
+ps aux | grep kimaki
+
+# Start kimaki if not running
+npx -y kimaki@latest
+```
+
+<Tip>
+Consider using a process manager like systemd or PM2 to keep Kimaki running in the background.
+</Tip>
+
+### Verify Channel Metadata
+
+Each Kimaki channel should have metadata in its topic. Check the channel topic for XML metadata:
+
+```xml
+<kimaki><directory>/path/to/project</directory><app>bot_id</app></kimaki>
+```
+
+If this is missing, the channel isn't properly configured. Try running `/add-project` again.
+
+## Permission Errors
+
+### "no-kimaki" Role Blocking Access
+
+If you have the "no-kimaki" role, you cannot trigger sessions even if you're a server owner.
+
+**Solution:** Remove the "no-kimaki" role from your Discord user.
+
+<Warning>
+This is intentional - the "no-kimaki" role implements the "four-eyes principle" to prevent accidental usage.
+</Warning>
+
+### Permission Prompts in Thread
+
+When the AI tries to run a tool that requires approval, Kimaki shows permission buttons in the Discord thread:
+
+- **Accept** - approve this one request
+- **Accept Always** - auto-approve similar requests for the rest of the session
+- **Deny** - block the request
+
+By default, operations touching paths outside the project directory require approval.
+
+**Customize permissions** in `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "git *": "allow",
+      "npm *": "allow",
+      "rm *": "deny"
+    },
+    "external_directory": {
+      "~/other-project/**": "allow"
+    }
+  }
+}
+```
+
+<Note>
+If you change `opencode.json` while the bot is running, restart the OpenCode server using `/restart-opencode-server` or restart Kimaki.
+</Note>
+
+## Multiple Instances Issues
+
+### Lock Port Conflicts
+
+If you run multiple Kimaki instances on the same machine without setting different lock ports, they will conflict:
+
+**Error:**
+```
+DirectoryNotAccessibleError: Directory does not exist or is not accessible
+```
+
+or
+
+```
+ServerStartError: Server failed to start on port 31000
+```
+
+**Solution:** Use separate lock ports for each instance:
+
+<CodeGroup>
+```bash Instance 1
+npx -y kimaki@latest
+```
+
+```bash Instance 2
+KIMAKI_LOCK_PORT=31001 npx -y kimaki@latest --data-dir ~/work-bot
+```
+</CodeGroup>
+
+### Database Conflicts
+
+Each Kimaki instance needs its own database. Use `--data-dir` to separate instances:
+
+```bash
+KIMAKI_LOCK_PORT=31001 npx -y kimaki@latest --data-dir ~/work-bot
+```
+
+## OpenCode Server Issues
+
+### Server Not Starting
+
+**Symptoms:**
+- No response from the bot
+- Error messages about server startup
+
+**Solutions:**
+
+<Steps>
+  <Step title="Check log file">
+    Read `~/.kimaki/kimaki.log` (or `<data-dir>/kimaki.log`) for error messages
+  </Step>
+  <Step title="Verify directory access">
+    Ensure the project directory exists and is readable
+  </Step>
+  <Step title="Check port availability">
+    Verify no other process is using the OpenCode server port
+  </Step>
+  <Step title="Restart Kimaki">
+    Stop and restart the Kimaki process
+  </Step>
+</Steps>
+
+### Server in Error State
+
+If you see "ServerNotReadyError: OpenCode server is in an error state":
+
+**Solution:**
+
+1. Check the log file at `~/.kimaki/kimaki.log`
+2. Look for errors related to the specific directory
+3. Try restarting the OpenCode server with `/restart-opencode-server`
+4. If that doesn't work, restart the entire Kimaki process
+
+## Voice Message Transcription Issues
+
+### API Key Missing
+
+**Error:** `ApiKeyMissingError: Gemini API key is required`
+
+**Solution:** Kimaki will prompt you for a Gemini API key during setup. If you skipped this step, restart the setup wizard:
+
+```bash
+npx -y kimaki@latest
+```
+
+### Invalid Audio Format
+
+**Error:** `InvalidAudioFormatError: Invalid audio format`
+
+**Solution:** Discord sends voice messages in Opus format. Kimaki handles decoding automatically, but if you encounter this error:
+
+1. Try recording a new voice message
+2. Check your Discord client is up to date
+3. Verify the voice message uploaded successfully (you can play it back in Discord)
+
+### Empty Transcription
+
+**Error:** `EmptyTranscriptionError: Model returned empty transcription`
+
+This happens when the audio is silent or the model couldn't transcribe it.
+
+**Solutions:**
+
+- Ensure your microphone is working
+- Speak clearly and avoid background noise
+- Try a shorter voice message first
+- Check your Gemini API key is valid
+
+## Session Management Issues
+
+### Session Not Found
+
+**Error:** `SessionNotFoundError: Session <id> not found`
+
+This happens when trying to resume or fork a session that doesn't exist.
+
+**Solutions:**
+
+<Accordion title="Use autocomplete">
+The `/resume` command has autocomplete - start typing to see available sessions.
+</Accordion>
+
+<Accordion title="Check session ID">
+Verify the session ID is correct. Session IDs are stored in the database at `~/.kimaki/discord-sessions.db`.
+</Accordion>
+
+### Session Aborted Unexpectedly
+
+**Error:** `SessionAbortError: Session aborted: <reason>`
+
+Reasons for session abort:
+
+- User ran `/abort` command
+- Server process crashed
+- Network connection lost
+- Timeout or resource limit reached
+
+Check the log file at `~/.kimaki/kimaki.log` for details.
+
+## Git Worktree Issues
+
+### Dirty Worktree Error
+
+**Error:** `DirtyWorktreeError: Uncommitted changes in worktree. Commit all changes before merging.`
+
+**Solution:** Commit all changes in the worktree before running `/merge-worktree`:
+
+```bash
+cd <worktree-directory>
+git add .
+git commit -m "Your commit message"
+```
+
+### Rebase Conflict
+
+**Error:** `RebaseConflictError: Rebase conflict while rebasing onto main. Resolve conflicts, then run merge again.`
+
+**Solution:**
+
+<Steps>
+  <Step title="Navigate to worktree">
+    `cd <worktree-directory>`
+  </Step>
+  <Step title="Resolve conflicts">
+    Edit conflicting files and resolve merge markers
+  </Step>
+  <Step title="Stage resolved files">
+    `git add <resolved-files>`
+  </Step>
+  <Step title="Continue rebase">
+    `git rebase --continue`
+  </Step>
+  <Step title="Try merge again">
+    Run `/merge-worktree` in Discord
+  </Step>
+</Steps>
+
+### Nothing to Merge
+
+**Error:** `NothingToMergeError: No commits to merge -- branch is already up to date with main`
+
+This means the worktree branch has no new commits compared to the target branch.
+
+**Solution:** This isn't an error - the branches are already in sync. You can safely delete the worktree.
+
+## CI Automation Issues
+
+### Bot Token Not Found
+
+**Error:** Missing `KIMAKI_BOT_TOKEN` environment variable
+
+**Solution:** Add the bot token to your CI secrets:
+
+<Steps>
+  <Step title="GitHub Actions">
+    Settings → Secrets → Actions → New repository secret
+  </Step>
+  <Step title="Name the secret">
+    `KIMAKI_BOT_TOKEN`
+  </Step>
+  <Step title="Paste your bot token">
+    Get the token from Discord Developer Portal
+  </Step>
+</Steps>
+
+### Session Not Starting from CI
+
+**Symptoms:**
+- Thread created in Discord but no AI response
+- Command succeeds in CI but nothing happens
+
+**Solutions:**
+
+<Accordion title="Verify bot is running">
+The Kimaki bot must be running on your machine to pick up threads created by CI.
+</Accordion>
+
+<Accordion title="Check channel ID">
+Verify the `--channel` ID is correct. Right-click the channel in Discord and select "Copy Channel ID".
+</Accordion>
+
+<Accordion title="Verify bot is installed">
+Ensure the bot is installed in the server where the channel exists.
+</Accordion>
+
+<Accordion title="Check log file">
+Read `~/.kimaki/kimaki.log` on the machine running the bot for error messages.
+</Accordion>
+
+## Debugging Tips
+
+### Check Log File
+
+Kimaki writes logs to `<data-dir>/kimaki.log` (default: `~/.kimaki/kimaki.log`). The log file is reset on every bot startup, so it only contains logs from the current run.
+
+```bash
+# View log file
+cat ~/.kimaki/kimaki.log
+
+# Follow log file in real-time
+tail -f ~/.kimaki/kimaki.log
+```
+
+### Enable Debug Mode
+
+Set `DEBUG=kimaki:*` to see more detailed logs:
+
+```bash
+DEBUG=kimaki:* npx -y kimaki@latest
+```
+
+### Check Database
+
+The SQLite database at `~/.kimaki/discord-sessions.db` contains:
+
+- Bot credentials
+- Channel mappings
+- Session history
+- Scheduled tasks
+
+You can inspect it with any SQLite viewer:
+
+```bash
+sqlite3 ~/.kimaki/discord-sessions.db
+```
+
+### Graceful Restart
+
+To restart the bot without losing connections, send `SIGUSR2` signal:
+
+```bash
+# Find the process ID
+ps aux | grep kimaki
+
+# Send restart signal
+kill -SIGUSR2 <PID>
+```
+
+The bot will wait 1000ms and then restart itself with the same arguments.
+
+## Getting Help
+
+If you're still experiencing issues:
+
+<Steps>
+  <Step title="Check the log file">
+    Read `~/.kimaki/kimaki.log` for error details
+  </Step>
+  <Step title="Search existing issues">
+    Check if someone else encountered the same problem
+  </Step>
+  <Step title="Report the issue">
+    Create a new issue with:
+    - Error message from logs
+    - Steps to reproduce
+    - Your environment (OS, Node version, Kimaki version)
+  </Step>
+</Steps>
+
+<Tip>
+When reporting issues, redact sensitive information like bot tokens, channel IDs, and file paths.
+</Tip>

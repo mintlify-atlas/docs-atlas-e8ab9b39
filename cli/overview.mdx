@@ -1,0 +1,122 @@
+---
+title: CLI overview
+description: Command-line interface for managing Kimaki Discord bot instances
+---
+
+Kimaki provides a comprehensive CLI for managing Discord bot instances, creating project channels, sending messages programmatically, and automating workflows.
+
+## Installation
+
+The CLI is distributed via npm and can be run without installation:
+
+```bash
+npx -y kimaki@latest
+```
+
+For frequent use, install globally:
+
+```bash
+npm install -g kimaki
+```
+
+## Command structure
+
+All commands follow this pattern:
+
+```bash
+kimaki [command] [options]
+```
+
+## Available commands
+
+<CardGroup cols={2}>
+  <Card title="send" icon="paper-plane" href="/cli/send">
+    Start sessions programmatically from CI or automation
+  </Card>
+  <Card title="project add" icon="folder-plus" href="/cli/project-add">
+    Create Discord channels for project directories
+  </Card>
+  <Card title="upload-to-discord" icon="cloud-arrow-up" href="/cli/upload-to-discord">
+    Upload files to Discord threads
+  </Card>
+  <Card title="task" icon="clock" href="/cli/task-management">
+    Manage scheduled tasks
+  </Card>
+  <Card title="upgrade" icon="arrow-up" href="/cli/upgrade">
+    Upgrade Kimaki to the latest version
+  </Card>
+</CardGroup>
+
+## Common options
+
+These options work across multiple commands:
+
+| Option | Description |
+| --- | --- |
+| `--data-dir <path>` | Custom data directory (default: `~/.kimaki`) |
+| `--help` | Show help for a command |
+| `--version` | Show Kimaki version |
+
+## Environment variables
+
+<ParamField path="KIMAKI_BOT_TOKEN" type="string">
+  Discord bot token for authentication. Required for CI/automation when bot credentials aren't in the database.
+</ParamField>
+
+<ParamField path="KIMAKI_LOCK_PORT" type="number">
+  Lock port for single-instance enforcement. Auto-derived from `--data-dir` if not set.
+</ParamField>
+
+<ParamField path="KIMAKI_VITEST" type="string">
+  Set to `1` to suppress terminal log noise during test runs.
+</ParamField>
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | General error |
+| `64` | Exit without restart (used internally) |
+
+## Interactive vs non-interactive mode
+
+When you run `kimaki` without arguments, it enters **interactive mode** with a setup wizard:
+
+```bash
+kimaki
+```
+
+This guides you through:
+1. Creating or selecting a Discord bot
+2. Configuring bot settings
+3. Installing the bot to servers
+4. Adding project channels
+5. Starting the bot process
+
+For automation and CI, use **non-interactive commands** like `send` and `project add` with explicit arguments.
+
+## Best practices
+
+<Tip>
+  Use `--data-dir` to run multiple isolated Kimaki instances on the same machine. Each instance gets its own database, projects, and lock port.
+</Tip>
+
+<Note>
+  In CI environments, always set `KIMAKI_BOT_TOKEN` as a secret. Never commit bot tokens to version control.
+</Note>
+
+<Warning>
+  The `send` command creates threads that trigger the bot running on your machine. Ensure the bot process is running before using CLI automation.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Send command" href="/cli/send">
+    Start sessions from CI pipelines
+  </Card>
+  <Card title="CI automation" href="/guides/ci-automation">
+    GitHub Actions integration examples
+  </Card>
+</CardGroup>

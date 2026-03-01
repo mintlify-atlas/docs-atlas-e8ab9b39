@@ -1,0 +1,222 @@
+---
+title: kimaki send
+description: Start OpenCode sessions programmatically from CI, cron jobs, or automation scripts
+---
+
+The `send` command creates Discord threads with prompts, triggering the bot running on your machine to start OpenCode sessions. Essential for CI automation and scheduled workflows.
+
+## Usage
+
+```bash
+kimaki send --channel <channel-id> --prompt "your prompt"
+```
+
+## Starting a new session
+
+Create a new thread in a channel:
+
+```bash
+kimaki send \
+  --channel 1234567890123456789 \
+  --prompt "Review the authentication changes in PR #42"
+```
+
+The bot creates a thread and starts an OpenCode session with your prompt.
+
+## Continuing an existing thread
+
+Send a follow-up message to an existing thread:
+
+```bash
+# By thread ID
+kimaki send \
+  --thread 9876543210987654321 \
+  --prompt "Also check the error handling"
+
+# By session ID
+kimaki send \
+  --session abc123 \
+  --prompt "Run the test suite"
+```
+
+## Command options
+
+### Required (one of)
+
+<ParamField path="--channel" type="string">
+  Discord channel ID. Creates a new thread. Get this by right-clicking a channel in Discord → Copy Channel ID.
+</ParamField>
+
+<ParamField path="--thread" type="string">
+  Discord thread ID. Sends to an existing thread instead of creating a new one.
+</ParamField>
+
+<ParamField path="--session" type="string">
+  OpenCode session ID. Resolves the thread from the session and sends the prompt there.
+</ParamField>
+
+### Required
+
+<ParamField path="--prompt" type="string">
+  The message content to send. Can be a question, instruction, or context.
+</ParamField>
+
+### Optional
+
+<ParamField path="--name" type="string">
+  Thread name. Defaults to a preview of the prompt (first 100 chars). Only used when creating new threads with `--channel`.
+</ParamField>
+
+<ParamField path="--app-id" type="string">
+  Bot application ID for validation. Auto-derived from token if not provided.
+</ParamField>
+
+<ParamField path="--notify-only" type="boolean">
+  Create a notification thread without starting an AI session. Reply to the thread later to start a session with the notification as context.
+</ParamField>
+
+<ParamField path="--worktree" type="string">
+  Create a git worktree for isolated development. The session runs in a separate branch.
+  
+  Example: `--worktree feature-auth` creates a worktree named `⬦ feature-auth`.
+</ParamField>
+
+<ParamField path="--agent" type="string">
+  Select a specific agent for the session. Agents are defined in `.opencode/agent/*.md` files.
+</ParamField>
+
+<ParamField path="--model" type="string">
+  Select an AI model for the session. Format: `provider/model-name` (e.g., `anthropic/claude-sonnet-4-20250514`).
+</ParamField>
+
+<ParamField path="--user" type="string">
+  Discord user ID to attribute the message to. Useful for tracking who triggered automated sessions.
+</ParamField>
+
+<ParamField path="--send-at" type="string">
+  Schedule the message for later. Accepts:
+  - **One-time**: UTC ISO timestamp ending with `Z` (e.g., `2026-03-01T09:00:00Z`)
+  - **Recurring**: Cron expression in local timezone (e.g., `0 9 * * 1` for Mondays at 9am)
+  
+  Cannot be combined with `--wait`.
+</ParamField>
+
+<ParamField path="--wait" type="boolean">
+  Wait for the session to complete before exiting. Returns the session result.
+  
+  Cannot be combined with `--send-at`.
+</ParamField>
+
+## Environment variables
+
+<ParamField path="KIMAKI_BOT_TOKEN" type="string">
+  Discord bot token. Required in CI when credentials aren't in the database.
+</ParamField>
+
+## Examples
+
+### CI automation
+
+GitHub Actions workflow that investigates new issues:
+
+```yaml .github/workflows/investigate-issues.yml
+name: Investigate New Issues
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  investigate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start Kimaki Session
+        env:
+          KIMAKI_BOT_TOKEN: ${{ secrets.KIMAKI_BOT_TOKEN }}
+        run: |
+          npx -y kimaki send \
+            --channel "1234567890123456789" \
+            --prompt "Investigate issue ${{ github.event.issue.html_url }}" \
+            --name "Issue #${{ github.event.issue.number }}"
+```
+
+### Isolated worktree session
+
+Develop a feature in a separate git worktree:
+
+```bash
+kimaki send \
+  --channel 1234567890123456789 \
+  --prompt "Add dark mode support" \
+  --worktree dark-mode
+```
+
+### Notification without AI session
+
+Create a notification that doesn't immediately start AI processing:
+
+```bash
+kimaki send \
+  --channel 1234567890123456789 \
+  --prompt "User @john upgraded to Pro plan" \
+  --notify-only
+```
+
+Reply to the thread later to start a session with this context.
+
+### Scheduled task
+
+Schedule a weekly test run:
+
+```bash
+kimaki send \
+  --channel 1234567890123456789 \
+  --prompt "Run full test suite and report failures" \
+  --send-at "0 9 * * 1"  # Every Monday at 9am
+```
+
+### Long prompts
+
+For prompts over 2000 characters, Kimaki automatically uploads them as file attachments:
+
+```bash
+kimaki send \
+  --channel 1234567890123456789 \
+  --prompt "$(cat detailed-instructions.md)"
+```
+
+## Behavior
+
+1. **Message creation**: The command sends a Discord message to the specified channel or thread
+2. **Bot detection**: The running Kimaki bot detects the new message
+3. **Session start**: Bot starts an OpenCode session with your prompt
+4. **Response streaming**: AI responses stream back to the Discord thread
+5. **Exit**: The CLI command exits immediately unless `--wait` is used
+
+<Note>
+  The `send` command only creates the Discord message. Your Kimaki bot process must be running to pick up the message and start the session.
+</Note>
+
+<Warning>
+  Use either `--channel` (new thread) OR `--thread/--session` (existing thread), never both.
+</Warning>
+
+## Troubleshooting
+
+<Accordion title="Error: No bot token found">
+  Set the `KIMAKI_BOT_TOKEN` environment variable or run `kimaki` once to configure credentials in the database.
+</Accordion>
+
+<Accordion title="Message sent but no session starts">
+  Ensure the Kimaki bot process is running on your machine. Check the log file at `~/.kimaki/kimaki.log`.
+</Accordion>
+
+<Accordion title="Invalid channel ID">
+  Right-click the Discord channel → **Copy Channel ID**. Enable Developer Mode in Discord settings if the option doesn't appear.
+</Accordion>
+
+## Related
+
+- [CI automation guide](/guides/ci-automation)
+- [Scheduled tasks](/features/scheduled-tasks)
+- [Worktrees](/features/worktrees)

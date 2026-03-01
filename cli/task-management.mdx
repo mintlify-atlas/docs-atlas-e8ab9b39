@@ -1,0 +1,204 @@
+---
+title: Task management
+description: List and manage scheduled tasks with kimaki task commands
+---
+
+Kimaki's task management commands let you inspect and control scheduled tasks created with the `--send-at` flag.
+
+## Commands
+
+### List tasks
+
+View all scheduled tasks:
+
+```bash
+kimaki task list
+```
+
+### Delete a task
+
+Cancel a scheduled task by ID:
+
+```bash
+kimaki task delete <task-id>
+```
+
+## Listing tasks
+
+The `task list` command shows all scheduled tasks with their details:
+
+```bash
+$ kimaki task list
+
+Scheduled tasks:
+
+ID: 1
+  Created: 2026-03-01T10:30:00.000Z
+  Schedule: cron "0 9 * * 1" (America/Los_Angeles) next 2026-03-08T17:00:00.000Z
+  Channel: 1234567890123456789
+  Prompt: Run weekly test suite and report failures
+  Next run: 6d 8h
+
+ID: 2
+  Created: 2026-03-01T14:00:00.000Z
+  Schedule: one-time at 2026-03-02T09:00:00.000Z
+  Thread: 9876543210987654321
+  Prompt: Reminder: review PR #42
+  Next run: 18h
+```
+
+### Output fields
+
+<ResponseField name="ID" type="number">
+  Unique task identifier. Use this with `task delete`.
+</ResponseField>
+
+<ResponseField name="Created" type="timestamp">
+  When the task was scheduled.
+</ResponseField>
+
+<ResponseField name="Schedule" type="string">
+  - **One-time**: Shows the UTC timestamp
+  - **Recurring**: Shows cron expression, timezone, and next run time
+</ResponseField>
+
+<ResponseField name="Channel" type="string">
+  Discord channel ID (for tasks that create new threads).
+</ResponseField>
+
+<ResponseField name="Thread" type="string">
+  Discord thread ID (for tasks that send to existing threads).
+</ResponseField>
+
+<ResponseField name="Prompt" type="string">
+  The message that will be sent when the task runs.
+</ResponseField>
+
+<ResponseField name="Next run" type="string">
+  Relative time until the task executes (e.g., "6d 8h", "18h", "30m").
+</ResponseField>
+
+## Deleting tasks
+
+Cancel a scheduled task before it runs:
+
+```bash
+kimaki task delete 1
+```
+
+The task is removed from the database and will not execute.
+
+<Warning>
+  Deleting a task is permanent. You'll need to reschedule it with `kimaki send --send-at` if you delete it by mistake.
+</Warning>
+
+## Examples
+
+### Check upcoming tasks
+
+```bash
+kimaki task list
+```
+
+### Cancel a one-time task
+
+```bash
+# List tasks to find the ID
+kimaki task list
+
+# Delete task 2
+kimaki task delete 2
+```
+
+### Cancel a recurring task
+
+```bash
+# Stop the weekly test run
+kimaki task delete 1
+```
+
+### Reschedule by deleting and recreating
+
+```bash
+# Cancel old task
+kimaki task delete 3
+
+# Create new task with updated schedule
+kimaki send \
+  --channel 123 \
+  --prompt "Updated task" \
+  --send-at "0 10 * * 1"  # Changed from 9am to 10am
+```
+
+## Task lifecycle
+
+1. **Creation**: Tasks are created with `kimaki send --send-at`
+2. **Storage**: Stored in SQLite database at `~/.kimaki/discord-sessions.db`
+3. **Scheduling**: Task runner checks every minute for due tasks
+4. **Execution**: When due, the task creates a Discord message
+5. **Recurring tasks**: Next run time is calculated and task is rescheduled
+6. **One-time tasks**: Deleted from database after execution
+
+<Info>
+  Recurring tasks (cron expressions) never auto-delete. They run indefinitely until you delete them manually.
+</Info>
+
+## Task storage
+
+Tasks are stored in the `scheduled_tasks` table in the database:
+
+```sql
+CREATE TABLE scheduled_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  schedule_kind TEXT NOT NULL,  -- 'at' or 'cron'
+  run_at TEXT,                  -- UTC timestamp for one-time tasks
+  cron_expr TEXT,               -- Cron expression for recurring tasks
+  timezone TEXT,                -- Timezone for cron evaluation
+  payload TEXT NOT NULL         -- JSON with channel, prompt, options
+);
+```
+
+You can inspect this table directly with SQLite tools:
+
+```bash
+sqlite3 ~/.kimaki/discord-sessions.db "SELECT * FROM scheduled_tasks;"
+```
+
+## Troubleshooting
+
+<Accordion title="Task list is empty but I scheduled tasks">
+  Check that you're using the correct `--data-dir`. Each Kimaki instance has its own database and task list.
+</Accordion>
+
+<Accordion title="Recurring task didn't run at expected time">
+  Cron expressions use your local timezone, not UTC. Verify the timezone with `task list` output.
+</Accordion>
+
+<Accordion title="Task ran but bot didn't respond">
+  Tasks create Discord messages. Your Kimaki bot process must be running to detect and handle these messages.
+</Accordion>
+
+<Accordion title="Can't delete a task">
+  Ensure you're using the correct task ID from `task list`. IDs are database-specific and may differ between Kimaki instances.
+</Accordion>
+
+## Best practices
+
+<Tip>
+  Run `kimaki task list` after scheduling tasks to verify they were created correctly and check the next run time.
+</Tip>
+
+<Note>
+  For long-running Kimaki instances, periodically review scheduled tasks to remove outdated or unused recurring tasks.
+</Note>
+
+<Warning>
+  Deleting the SQLite database removes all scheduled tasks. Back up the database before manual modifications.
+</Warning>
+
+## Related
+
+- [Scheduled tasks feature](/features/scheduled-tasks)
+- [Send command](/cli/send)
+- [CI automation](/guides/ci-automation)

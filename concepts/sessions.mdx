@@ -1,0 +1,519 @@
+---
+title: Session Management
+description: OpenCode session lifecycle, management, queuing, and state handling
+---
+
+# Session Management
+
+Kimaki manages OpenCode AI sessions through Discord threads. Each thread maps to one OpenCode session that persists across messages.
+
+## Session Lifecycle
+
+### Creation
+
+Sessions are created automatically when you send the first message in a thread:
+
+```typescript
+// session-handler.ts: handleOpencodeSession
+1. Check if thread has existing session
+2. If no session:
+   - Create new OpenCode session
+   - Set session title (first 80 chars of prompt)
+   - Store thread → session mapping in SQLite
+3. If session exists:
+   - Reuse existing session
+   - Continue conversation
+```
+
+Session creation API call:
+
+```typescript
+const response = await client.session.create({
+  title: prompt.slice(0, 80),
+  directory: sdkDirectory
+})
+const sessionId = response.data.id
+await setThreadSession(threadId, sessionId)
+```
+
+### Session Reuse
+
+Replying to a thread reuses the same session:
+
+```typescript
+const sessionId = await getThreadSession(threadId)
+
+if (sessionId) {
+  // Verify session still exists on server
+  const session = await client.session.get({
+    sessionID: sessionId,
+    directory: sdkDirectory
+  })
+  // Continue with existing session
+}
+```
+
+This provides conversation continuity - the AI remembers previous context.
+
+### Abort and Interruption
+
+When a new message arrives during an active response:
+
+```typescript
+// 1. Signal abort via AbortController
+const controller = abortControllers.get(sessionId)
+controller.abort(new SessionAbortError({ reason: 'new-request' }))
+
+// 2. Call server abort API
+await client.session.abort({
+  sessionID: sessionId,
+  directory: sdkDirectory
+})
+
+// 3. Wait for cleanup (200ms debounce)
+await new Promise(resolve => setTimeout(resolve, 200))
+
+// 4. Process new message
+```
+
+Abort reasons:
+
+- `new-request`: User sent new message
+- `model-change`: User changed model mid-request
+- `finished`: Session completed normally
+
+### Session Termination
+
+Sessions terminate when:
+
+1. **Idle event received**: OpenCode signals completion
+2. **Manual abort**: `/abort` command
+3. **Error**: Unrecoverable error during processing
+4. **Server restart**: OpenCode server process restarts
+
+Terminated sessions remain in OpenCode's storage and can be resumed with `/resume`.
+
+## Message Queue
+
+Kimaki queues messages when the AI is busy:
+
+```typescript
+export const messageQueue = new Map<
+  string,        // threadId
+  QueuedMessage[]
+>()
+
+type QueuedMessage = {
+  prompt: string
+  userId: string
+  username: string
+  queuedAt: number
+  images?: DiscordFileAttachment[]
+  command?: { name: string; arguments: string }
+}
+```
+
+### Queue Behavior
+
+```typescript
+// Check if request is active
+const controller = abortControllers.get(sessionId)
+const hasActiveRequest = controller && !controller.signal.aborted
+
+if (hasActiveRequest) {
+  // Queue the message
+  addToQueue({ threadId, message })
+  // Abort current request immediately
+  controller.abort(new SessionAbortError({ reason: 'new-request' }))
+} else {
+  // Send immediately
+  handleOpencodeSession({ prompt, thread, ... })
+}
+```
+
+### Queue Draining
+
+After a response completes:
+
+```typescript
+// Check for queued messages
+const queue = messageQueue.get(threadId)
+if (queue && queue.length > 0) {
+  const nextMessage = queue.shift()
+  
+  // Process next message
+  handleOpencodeSession({
+    prompt: nextMessage.prompt,
+    thread,
+    projectDirectory,
+    channelId,
+    username: nextMessage.username,
+    userId: nextMessage.userId,
+    images: nextMessage.images
+  })
+}
+```
+
+Use `/queue <message>` to explicitly queue a follow-up message.
+
+## Event Stream Processing
+
+Kimaki subscribes to OpenCode's Server-Sent Events (SSE) stream:
+
+```typescript
+const events = await client.event.subscribe(
+  { directory: sdkDirectory },
+  { signal: abortController.signal }
+)
+
+for await (const event of events.stream) {
+  switch (event.type) {
+    case 'message.updated':
+      // Buffer and display message parts
+      break
+    case 'step-finish':
+      // Flush buffered parts, stop typing
+      break
+    case 'permission.request':
+      // Show permission buttons
+      break
+    case 'question.request':
+      // Show question dropdowns
+      break
+    case 'idle':
+      // Session completed, drain queue
+      break
+  }
+}
+```
+
+### Part Buffering
+
+Message parts are buffered and flushed strategically:
+
+```typescript
+const partBuffer = new Map<
+  string,              // messageID
+  Map<string, Part>    // partID → Part
+>()
+
+// Buffer parts as they stream in
+function storePart(part: Part) {
+  const messageParts = partBuffer.get(part.messageID) || new Map()
+  messageParts.set(part.id, part)
+  partBuffer.set(part.messageID, messageParts)
+}
+
+// Flush when appropriate:
+- Text part completes (time.end is set)
+- Tool part starts running
+- Step finishes
+- Permission/question request
+```
+
+### Typing Indicator
+
+Kimaki shows typing indicator during AI responses:
+
+```typescript
+function startTyping() {
+  // Initial typing
+  await thread.sendTyping()
+  
+  // Refresh every 8 seconds (Discord expires at ~10s)
+  typingInterval = setInterval(() => {
+    thread.sendTyping()
+  }, 8000)
+}
+
+function stopTyping() {
+  clearInterval(typingInterval)
+  clearTimeout(typingRestartTimeout)
+}
+
+// Stop during permission/question prompts
+// Restart 300ms after prompt is answered
+```
+
+## Session Preferences
+
+### Model Selection
+
+Model priority order:
+
+1. **Explicit override**: `/model` command or `--model` flag
+2. **Session preference**: Saved from previous `/model` command
+3. **Channel default**: Set via `/model` in channel
+4. **OpenCode config**: `opencode.json` `model` field
+5. **Recent TUI model**: From `~/.local/state/opencode/model.json`
+6. **Provider default**: First connected provider's default model
+
+```typescript
+const modelInfo = await getCurrentModelInfo({
+  sessionId,
+  channelId,
+  appId,
+  agentPreference,
+  getClient
+})
+
+if (modelInfo.type === 'none') {
+  // No provider connected
+  await thread.send('No AI provider connected. Use `/connect` command.')
+  return
+}
+
+// Use modelInfo.providerID / modelInfo.modelID
+```
+
+### Agent Selection
+
+Agent priority order:
+
+1. **Explicit override**: `--agent` flag
+2. **Session preference**: Saved from previous `/agent` command
+3. **Channel default**: Set via `/agent` in channel
+4. **OpenCode default**: Primary agent from config
+
+```typescript
+const { agentPreference, agents } = 
+  await resolveValidatedAgentPreference({
+    agent: overrideAgent,
+    sessionId,
+    channelId,
+    getClient
+  })
+
+if (agentPreference) {
+  // Use specific agent
+} else {
+  // Use OpenCode's default agent selection
+}
+```
+
+### Preferences Snapshot
+
+Preferences are snapshotted early to avoid race conditions:
+
+```typescript
+// Before event subscription
+const earlyAgentPreference = await resolveValidatedAgentPreference(...)
+const earlyModelParam = await getCurrentModelInfo(...)
+const earlyThinkingValue = await validateThinkingVariant(...)
+
+// Use these snapshots for the entire request
+// User changes during request don't affect current response
+```
+
+## Permission Handling
+
+When OpenCode requests permission:
+
+```typescript
+// Store pending permission
+pendingPermissions.set(threadId, new Map([
+  [permission.id, {
+    permission,
+    messageId,
+    directory,
+    permissionDirectory,
+    contextHash,
+    dedupeKey
+  }]
+]))
+
+// Show buttons
+await showPermissionButtons({
+  thread,
+  permission,
+  directory,
+  permissionDirectory
+})
+
+// Stop typing while waiting
+stopTyping()
+
+// User clicks button → permission.reply()
+// Resume typing 300ms later
+```
+
+### Permission Deduplication
+
+Multiple identical permission requests are merged:
+
+```typescript
+function buildPermissionDedupeKey({
+  permission,
+  directory
+}) {
+  const sorted = [...permission.patterns].sort()
+  return `${directory}::${permission.permission}::${sorted.join('|')}`
+}
+
+// If dedupeKey already exists, batch requests:
+context.requestIds.push(permission.id)
+// All are answered together when user clicks button
+```
+
+### Auto-Reject on New Message
+
+Pending permissions are auto-rejected when a new message arrives:
+
+```typescript
+for (const [permId, pendingPerm] of threadPermissions) {
+  // Remove buttons from Discord message
+  await msg.edit({ components: [] })
+  
+  // Reject permission via API
+  await client.permission.reply({
+    requestID: permId,
+    directory: pendingPerm.permissionDirectory,
+    reply: 'reject'
+  })
+  
+  // Cleanup context
+  cleanupPermissionContext(pendingPerm.contextHash)
+}
+```
+
+## Question Handling
+
+OpenCode can ask questions via the `question` tool:
+
+```typescript
+// Plugin tool registration
+export async function kimaki_question(input: {
+  question: string
+  options: string[]
+  allow_multiple: boolean
+}) {
+  // Show dropdown menu in Discord
+  await showAskUserQuestionDropdowns({
+    thread,
+    question: input.question,
+    options: input.options,
+    allowMultiple: input.allow_multiple
+  })
+  
+  // Wait for user selection (blocks plugin tool)
+  const answer = await waitForQuestionAnswer()
+  return { answer }
+}
+```
+
+If user sends a message instead of answering:
+
+```typescript
+// Auto-answer with the message content
+const answered = await cancelPendingQuestion(threadId, userMessage)
+if (answered) {
+  // Plugin tool unblocks with user message as answer
+}
+```
+
+## Session Commands
+
+### Resume Previous Session
+
+```typescript
+// /resume command
+const sessions = await client.session.list({ directory })
+const options = sessions.data.map(s => ({
+  label: s.title,
+  value: s.id
+}))
+
+// User selects session
+await setThreadSession(threadId, selectedSessionId)
+```
+
+### Fork Session
+
+```typescript
+// /fork command
+const messages = await client.session.messages({ sessionID })
+// User selects message to fork from
+const newSession = await client.session.fork({
+  sessionID,
+  messageID: selectedMessageId
+})
+await setThreadSession(threadId, newSession.data.id)
+```
+
+### Share Session
+
+```typescript
+// /share command
+const shareUrl = await client.session.share({ sessionID })
+await interaction.reply({ content: shareUrl.data.url })
+```
+
+## Subtask Sessions
+
+When OpenCode spawns subtasks (e.g., `task` tool):
+
+```typescript
+const subtaskSessions = new Map<
+  string,  // childSessionId
+  { label: string; assistantMessageId?: string }
+>()
+
+if (part.tool === 'task') {
+  const childSessionId = part.state.metadata?.sessionId
+  const agent = part.state.input?.subagent_type || 'task'
+  
+  // Track spawned tasks per agent type
+  agentSpawnCounts[agent] = (agentSpawnCounts[agent] || 0) + 1
+  const label = `${agent}-${agentSpawnCounts[agent]}`
+  
+  subtaskSessions.set(childSessionId, { label })
+  
+  // Show in Discord
+  await thread.send(`┣ task **${description}** _${agent}_`)
+}
+```
+
+Subtask messages are tracked separately but not shown in Discord by default (to avoid spam).
+
+## Verbosity Modes
+
+Control how much output is shown:
+
+```typescript
+type Verbosity = 
+  | 'text-only'                  // Only text parts
+  | 'text-and-essential-tools'   // Text + edits, bash, custom MCP tools
+  | 'tools-and-text'             // Everything (default)
+
+const verbosity = await getChannelVerbosity(channelId)
+
+function shouldShowPart(part: Part): boolean {
+  if (verbosity === 'text-only') {
+    return part.type === 'text'
+  }
+  if (verbosity === 'text-and-essential-tools') {
+    return part.type === 'text' || isEssentialToolPart(part)
+  }
+  return true // tools-and-text shows everything
+}
+```
+
+Non-essential tools hidden in `text-and-essential-tools` mode:
+
+- `read`, `list`, `glob`, `grep`
+- `todoread`, `question`, `kimaki_action_buttons`
+- `webfetch`
+
+## Session Persistence
+
+Session data persists in:
+
+1. **OpenCode storage**: Session messages, state, metadata
+2. **SQLite database**: Thread → session mapping, preferences
+3. **Discord threads**: Visual conversation history
+
+Deleting a Discord thread does NOT delete the OpenCode session. You can:
+
+- Resume the session in a new thread with `/resume`
+- Access it via OpenCode TUI
+- Export it with `/share`

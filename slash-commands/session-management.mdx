@@ -1,0 +1,278 @@
+---
+title: Session Management Commands
+description: Commands for creating, resuming, and controlling OpenCode sessions in Discord
+---
+
+Session management commands let you start new coding sessions, resume previous work, and control active sessions.
+
+## /session
+
+Start a new OpenCode session with an initial prompt.
+
+### Parameters
+
+- `prompt` (required) - The task description for the AI
+- `files` (optional) - Comma-separated list of files to reference (with autocomplete)
+- `agent` (optional) - Agent to use for this session (with autocomplete)
+
+### Usage
+
+```
+/session prompt:"Add user authentication with JWT tokens"
+```
+
+With file references:
+
+```
+/session prompt:"Review these files" files:"src/auth.ts, src/api.ts"
+```
+
+With a specific agent:
+
+```
+/session prompt:"Plan the authentication flow" agent:"plan"
+```
+
+### Behavior
+
+1. Creates a starter message in the channel: "🚀 Starting OpenCode session"
+2. Creates a new thread with the prompt as the title (max 100 chars)
+3. Adds you to the thread so it appears in your sidebar
+4. Starts an OpenCode session with your prompt
+5. Streams the AI's response in the thread
+
+<Note>
+**File References**: When you provide files, Kimaki appends them to your prompt as `@file1 @file2`. The autocomplete searches your project files by name.
+</Note>
+
+## /resume
+
+Resume a previous OpenCode session in a new thread.
+
+### Parameters
+
+- `session` (required) - Session ID to resume (with autocomplete showing recent sessions)
+
+### Usage
+
+```
+/resume session:"abc123..."
+```
+
+The autocomplete shows sessions with:
+- Title preview
+- Last updated timestamp
+- Excludes sessions already open in other threads
+
+### Behavior
+
+1. Creates a new thread: "Resume: [session title]"
+2. Links the thread to the existing session ID in the database
+3. Fetches all messages from the session
+4. Displays the last assistant response in Discord
+5. Shows a confirmation: "Session resumed! Loaded N messages."
+
+<Note>
+**Message History**: Only the **most recent assistant response** is displayed in Discord to avoid flooding the thread. The full session history remains in OpenCode.
+</Note>
+
+### Skipped Messages
+
+If the session has many assistant messages, Kimaki skips older ones and shows:
+
+```
+Skipped 10 older assistant parts...
+```
+
+This keeps Discord threads readable while preserving the full context in OpenCode.
+
+## /abort
+
+Abort the currently running OpenCode request in a thread.
+
+### Parameters
+
+None.
+
+### Usage
+
+```
+/abort
+```
+
+### Behavior
+
+1. Checks if there's an active session in the current thread
+2. Aborts the in-flight OpenCode request using `AbortController`
+3. Calls the OpenCode API to abort the session server-side
+4. Shows confirmation: "🛑 Request aborted"
+
+<Warning>
+**Thread Only**: This command only works inside session threads, not in project channels.
+</Warning>
+
+### When to Use
+
+- The AI is heading in the wrong direction
+- You want to stop and provide more context
+- The response is taking too long
+
+<Note>
+**Queued Messages**: Aborting clears any queued messages for that session.
+</Note>
+
+## /fork
+
+Fork a session from any previous user message, creating a new branch of the conversation.
+
+### Parameters
+
+None - shows an interactive dropdown.
+
+### Usage
+
+```
+/fork
+```
+
+### Behavior
+
+<Steps>
+
+### Select a Message
+
+Kimaki shows a dropdown with up to 25 recent user messages:
+
+```
+1. Add authentication (2024-03-01 10:30:00)
+2. Review the changes (2024-03-01 10:35:00)
+3. Add error handling (2024-03-01 10:40:00)
+```
+
+### Create Forked Session
+
+1. Calls the OpenCode API to fork from the selected message ID
+2. Creates a new thread: "Fork: [session title]"
+3. Displays the last assistant response from the forked session
+4. Shows: "Session forked! Continue in [thread link]"
+
+### Continue from That Point
+
+The forked session continues as if you had **not sent** messages after the selected one.
+
+</Steps>
+
+<Note>
+**Synthetic Messages Hidden**: The dropdown filters out synthetic messages (branch context, memory reminders) injected by the OpenCode plugin to keep the list clean.
+</Note>
+
+### Example Workflow
+
+```
+Original thread:
+  User: Add auth
+  Assistant: [implements auth]
+  User: Add logging  <-- You want to fork here
+  Assistant: [implements logging]
+```
+
+After forking from "Add logging":
+
+```
+Forked thread:
+  User: Add auth
+  Assistant: [implements auth]
+  User: [your new message]  <-- Branch point
+```
+
+The "Add logging" message and its response don't exist in the forked session.
+
+## /share
+
+Generate a public URL to share the current session.
+
+### Parameters
+
+None.
+
+### Usage
+
+```
+/share
+```
+
+### Behavior
+
+1. Checks if there's an active session in the thread
+2. Calls the OpenCode API to create a share link
+3. Returns the URL: "🔗 Session shared: https://opencode.ai/share/abc123"
+
+<Warning>
+**Public Access**: The share link allows anyone with the URL to view the entire session transcript, including:
+- All messages
+- Code changes
+- File contents
+- Tool executions
+
+Do not share sessions containing secrets or sensitive data.
+</Warning>
+
+### Share Link Features
+
+- **Read-only**: Viewers cannot edit or continue the session
+- **No expiration**: Links remain valid indefinitely
+- **Live updates**: If you continue the session, the share link updates in real-time
+
+## Error Handling
+
+All session commands validate:
+
+- **Channel type**: Must be used in the correct context (channel vs thread)
+- **Bot configuration**: Channel must be configured for the correct bot
+- **Directory existence**: Project directory must exist on the machine
+- **Session state**: Session must be in the expected state (active, exists, etc.)
+
+Common error messages:
+
+```
+This channel is not configured with a project directory
+→ Run /add-project to set up the channel
+
+No active session in this thread
+→ Only works in threads with active sessions
+
+Directory does not exist: /path/to/project
+→ The project was moved or deleted
+```
+
+## Best Practices
+
+<Accordion title="Use descriptive prompts">
+  Good prompts are specific and actionable:
+  
+  **Good**:
+  ```
+  /session prompt:"Add JWT authentication to the Express API with refresh tokens"
+  ```
+  
+  **Bad**:
+  ```
+  /session prompt:"Add auth"
+  ```
+</Accordion>
+
+<Accordion title="Resume long-running work">
+  If a session spans multiple days:
+  
+  1. End the thread naturally (don't /abort)
+  2. Later, use `/resume` to continue
+  3. The AI has full context from previous messages
+</Accordion>
+
+<Accordion title="Fork to explore alternatives">
+  When you want to try a different approach:
+  
+  1. Use `/fork` to branch from before the unwanted changes
+  2. Try the alternative in the forked thread
+  3. Keep both threads to compare results
+</Accordion>
