@@ -1,0 +1,286 @@
+---
+title: Session commands
+description: Read and search OpenCode session history from the command line
+---
+
+Kimaki provides CLI commands for reading and searching past OpenCode sessions without opening Discord.
+
+## Commands overview
+
+| Command | Description |
+| --- | --- |
+| `session read <sessionId>` | Read a session conversation as markdown |
+| `session search <query>` | Search past sessions for text or regex patterns |
+| `session archive <threadId>` | Archive a Discord thread and stop its session |
+
+## session read
+
+Read a complete session conversation as markdown. Useful for reviewing past sessions, grepping for specific content, or exporting conversations.
+
+### Usage
+
+```bash
+kimaki session read <sessionId>
+```
+
+### Options
+
+<ParamField path="--project" type="string">
+  Project directory to search. Defaults to current working directory.
+</ParamField>
+
+### Examples
+
+#### Read a session
+
+```bash
+kimaki session read abc123xyz
+```
+
+Outputs the full conversation to stdout:
+
+```markdown
+# Session abc123xyz
+
+## User
+Add authentication to the API
+
+## Assistant
+I'll add JWT authentication...
+```
+
+#### Save to file
+
+```bash
+kimaki session read abc123xyz > session-backup.md
+```
+
+#### Search within a session
+
+```bash
+kimaki session read abc123xyz | grep -A 5 "authentication"
+```
+
+#### Read from specific project
+
+```bash
+kimaki session read abc123 --project ~/projects/my-app
+```
+
+### Behavior
+
+1. **Current project first**: Searches the project in `--project` (or cwd) first
+2. **Global search**: If not found, searches all registered projects
+3. **Output to stdout**: Writes markdown directly to stdout (no logging)
+4. **Exit codes**: 0 on success, non-zero if session not found
+
+<Note>
+  The command connects to the OpenCode server for the project, so the server must be running or will be started automatically.
+</Note>
+
+## session search
+
+Search past sessions for text patterns or regular expressions. Find sessions containing specific keywords, error messages, or code patterns.
+
+### Usage
+
+```bash
+kimaki session search <query>
+```
+
+### Options
+
+<ParamField path="--project" type="string">
+  Project directory to search. Defaults to current working directory.
+</ParamField>
+
+<ParamField path="--channel" type="string">
+  Discord channel ID. Resolves project directory from the channel mapping.
+</ParamField>
+
+<ParamField path="--limit" type="number">
+  Maximum matched sessions to return. Default: 20.
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Output results as JSON for scripting.
+</ParamField>
+
+### Query syntax
+
+#### Plain text search
+
+```bash
+kimaki session search "authentication"
+```
+
+Matches sessions containing the word "authentication".
+
+#### Regex search
+
+Wrap patterns in `/` with optional flags:
+
+```bash
+kimaki session search "/error.*database/i"
+```
+
+Matches "error" followed by "database" (case-insensitive).
+
+### Examples
+
+#### Search for keyword
+
+```bash
+kimaki session search "API key"
+```
+
+#### Search with regex
+
+```bash
+kimaki session search "/function\s+\w+Auth/"
+```
+
+#### Search specific project
+
+```bash
+kimaki session search "bug fix" --project ~/projects/my-app
+```
+
+#### Search from Discord channel
+
+```bash
+kimaki session search "deploy" --channel 1234567890123456789
+```
+
+#### Limit results
+
+```bash
+kimaki session search "test" --limit 5
+```
+
+#### JSON output for scripting
+
+```bash
+kimaki session search "error" --json | jq '.[].sessionID'
+```
+
+### Output format
+
+Human-readable format shows:
+- Session ID
+- Match count
+- Context snippets with highlighted matches
+- Relative timestamps
+
+```
+Session: abc123xyz (3 matches) - 2 hours ago
+  ...added **authentication** middleware...
+  ...JWT **authentication** flow...
+  ...testing **authentication** logic...
+```
+
+JSON format provides structured data for scripting:
+
+```json
+[
+  {
+    "sessionID": "abc123xyz",
+    "matchCount": 3,
+    "snippets": [
+      "...added authentication middleware..."
+    ],
+    "timestamp": "2026-03-01T10:30:00Z"
+  }
+]
+```
+
+## session archive
+
+Archive a Discord thread and stop its mapped OpenCode session. Useful for cleaning up completed threads programmatically.
+
+### Usage
+
+```bash
+kimaki session archive <threadId>
+```
+
+### Examples
+
+#### Archive a thread
+
+```bash
+kimaki session archive 9876543210987654321
+```
+
+#### Archive multiple threads
+
+```bash
+for thread in $(cat thread-ids.txt); do
+  kimaki session archive "$thread"
+done
+```
+
+### Behavior
+
+1. **Validates thread**: Ensures the channel is actually a Discord thread
+2. **Stops session**: If an OpenCode session is mapped, stops it gracefully
+3. **Archives thread**: Marks the Discord thread as archived
+4. **Database cleanup**: Updates internal state
+
+<Warning>
+  Archiving a thread with an active session will stop that session immediately.
+</Warning>
+
+## Use cases
+
+### Audit past conversations
+
+Review what was discussed in previous sessions:
+
+```bash
+kimaki session search "bug" --limit 10
+```
+
+### Export session history
+
+Backup all sessions for a project:
+
+```bash
+for session in $(kimaki session search ".*" --json | jq -r '.[].sessionID'); do
+  kimaki session read "$session" > "sessions/$session.md"
+done
+```
+
+### Find sessions with errors
+
+```bash
+kimaki session search "/error|exception|failed/i" --json
+```
+
+### Clean up old threads
+
+Archive threads that haven't been active:
+
+```bash
+# Get thread IDs from database or Discord API
+kimaki session archive <thread-id>
+```
+
+## Troubleshooting
+
+<Accordion title="Session not found">
+  The session ID doesn't exist in the current project or any registered project. Verify the session ID with Discord's `/session-id` command.
+</Accordion>
+
+<Accordion title="OpenCode server won't start">
+  The project directory may have issues. Check that the directory exists and is a valid OpenCode project.
+</Accordion>
+
+<Accordion title="Search returns no results">
+  Try broadening your search query or checking that you're searching the correct project with `--project`.
+</Accordion>
+
+## Related
+
+- [Send command](/cli/send) - Start new sessions
+- [Sessions concept](/concepts/sessions) - How sessions work

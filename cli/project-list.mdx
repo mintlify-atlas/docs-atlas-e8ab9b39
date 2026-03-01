@@ -1,0 +1,156 @@
+---
+title: kimaki project list
+description: List all registered projects with their Discord channels
+---
+
+The `project list` command shows all projects registered in the Kimaki database along with their associated Discord channels.
+
+## Usage
+
+```bash
+kimaki project list
+```
+
+## Output formats
+
+### Human-readable (default)
+
+```bash
+kimaki project list
+```
+
+Displays a formatted list with channel names, folder names, directories, and bot app IDs:
+
+```
+#my-project
+   Folder: my-project
+   Directory: /Users/you/projects/my-project
+   Channel ID: 1234567890123456789
+   Bot App ID: 987654321098765432
+
+#another-project
+   Folder: another-project
+   Directory: /Users/you/projects/another-project
+   Channel ID: 9876543210987654321
+   Bot App ID: 987654321098765432
+```
+
+### JSON output
+
+```bash
+kimaki project list --json
+```
+
+Outputs structured JSON for programmatic use:
+
+```json
+[
+  {
+    "channel_id": "1234567890123456789",
+    "channel_name": "my-project",
+    "directory": "/Users/you/projects/my-project",
+    "folder_name": "my-project",
+    "app_id": "987654321098765432"
+  }
+]
+```
+
+## Command options
+
+<ParamField path="--json" type="boolean">
+  Output as JSON instead of human-readable format. Useful for scripting and automation.
+</ParamField>
+
+## What gets listed
+
+The command queries the `channel_directories` table in the SQLite database and shows:
+
+- **Channel name**: Fetched from Discord API (if bot has access)
+- **Folder name**: Basename of the project directory
+- **Full directory path**: Absolute path on your filesystem
+- **Channel ID**: Discord channel ID
+- **Bot app ID**: Which bot manages this channel (important for multi-bot setups)
+
+Only text channels are listed (not voice channels).
+
+## Examples
+
+### List all projects
+
+```bash
+kimaki project list
+```
+
+### Get project data as JSON
+
+```bash
+kimaki project list --json > projects.json
+```
+
+### Find a specific project
+
+```bash
+kimaki project list | grep "my-project"
+```
+
+### Count registered projects
+
+```bash
+kimaki project list --json | jq 'length'
+```
+
+## Use cases
+
+### Audit registered channels
+
+Verify which projects are registered and which Discord channels they map to:
+
+```bash
+kimaki project list
+```
+
+### Export project list for backup
+
+```bash
+kimaki project list --json > kimaki-projects-backup.json
+```
+
+### Script project enumeration
+
+```bash
+#!/bin/bash
+for project in $(kimaki project list --json | jq -r '.[].directory'); do
+  echo "Checking $project"
+  cd "$project" && git status
+done
+```
+
+## Behavior
+
+1. **Database query**: Reads from `channel_directories` table
+2. **Discord API call**: Attempts to fetch channel names from Discord
+3. **Channel name fallback**: If Discord API fails (channel deleted/bot removed), shows channel ID only
+4. **Sorting**: Channels listed by creation time (most recent first)
+
+<Info>
+  Channel names are fetched live from Discord. If a channel was deleted from Discord but still exists in the database, only the channel ID will be shown.
+</Info>
+
+## Troubleshooting
+
+<Accordion title="No projects registered">
+  You haven't added any projects yet. Run `kimaki project add` to register a directory.
+</Accordion>
+
+<Accordion title="Channel names not showing">
+  The bot may have been removed from the Discord server or lost access to channels. The database entry remains, but channel names can't be fetched.
+</Accordion>
+
+<Accordion title="Stale entries">
+  If channels were deleted from Discord, they remain in the database. You can manually remove them from the SQLite database or ignore them.
+</Accordion>
+
+## Related
+
+- [project add](/cli/project-add) - Register new projects
+- [Multiple instances](/configuration/multiple-instances) - Running multiple bots

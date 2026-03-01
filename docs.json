@@ -80,6 +80,8 @@
               "cli/overview",
               "cli/send",
               "cli/project-add",
+              "cli/project-list",
+              "cli/session-commands",
               "cli/upload-to-discord",
               "cli/task-management",
               "cli/upgrade"
